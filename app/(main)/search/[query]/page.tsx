@@ -7,13 +7,13 @@ import { ArtistRow } from '@/components/music/ArtistRow';
 import { useParams } from 'next/navigation';
 import { Loader2, Music2, Users, SquarePlay } from 'lucide-react';
 import { TrackSkeleton } from '@/components/ui/skeleton';
-import { cn } from '@/lib/utils';
+import { cn, safeDecodeURIComponent } from '@/lib/utils';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
 export default function SearchResultPage() {
   const params = useParams();
-  const query = params.query ? decodeURIComponent(params.query as string) : '';
+  const query = params.query ? safeDecodeURIComponent(params.query as string) : '';
   const [activeTab, setActiveTab] = useState<'tracks' | 'artists'>('tracks');
   const [isYoutubeEnabled, setIsYoutubeEnabled] = useState(false);
 

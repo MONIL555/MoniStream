@@ -11,6 +11,16 @@ export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
 
+// ─── Safe URI Decode ─────────────────────────────────────────
+
+export function safeDecodeURIComponent(str: string): string {
+  try {
+    return decodeURIComponent(str);
+  } catch (e) {
+    return str;
+  }
+}
+
 // ─── Duration Formatting ─────────────────────────────────────
 
 /** Format seconds into "3:45" or "1:02:15" */

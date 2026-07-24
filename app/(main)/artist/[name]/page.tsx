@@ -8,12 +8,13 @@ import { TrackSkeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { usePlayerStore } from '@/store/playerStore';
 import { useQueueStore } from '@/store/queueStore';
+import { safeDecodeURIComponent } from '@/lib/utils';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
 export default function ArtistPage() {
   const params = useParams();
-  const artistName = params.name ? decodeURIComponent(params.name as string) : '';
+  const artistName = params.name ? safeDecodeURIComponent(params.name as string) : '';
   
   // We search for the artist specifically
   const { data, error, isLoading } = useSWR(artistName ? `/api/search?q=${encodeURIComponent(artistName + ' songs')}` : null, fetcher);

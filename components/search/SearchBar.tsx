@@ -5,14 +5,14 @@ import { useRouter, useParams } from 'next/navigation';
 import { Search as SearchIcon, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { cn, safeDecodeURIComponent } from '@/lib/utils';
 
 export function SearchBar() {
   const router = useRouter();
   const params = useParams();
   
   const rawQuery = (params.query as string) || '';
-  const currentQuery = rawQuery ? decodeURIComponent(rawQuery) : '';
+  const currentQuery = rawQuery ? safeDecodeURIComponent(rawQuery) : '';
   
   const [query, setQuery] = useState(currentQuery);
   const inputRef = useRef<HTMLInputElement>(null);

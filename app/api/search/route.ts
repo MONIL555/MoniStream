@@ -27,7 +27,8 @@ export async function GET(req: NextRequest) {
     });
 
     // Step 2.5: Kick off rate-limit, Redis cache, and CachedTrack DB search in parallel
-    const cacheKey = `search:${validated.type}:${validated.q.toLowerCase()}`;
+    const sourceKey = validated.source || 'jiosaavn';
+    const cacheKey = `search:${sourceKey}:${validated.type}:${validated.q.toLowerCase()}`;
     
     const [, searchCacheResult, localCachedTracks] = await Promise.all([
       checkRateLimit(searchLimiter, ip),
@@ -60,7 +61,10 @@ export async function GET(req: NextRequest) {
     if (searchCacheResult) {
       const parsedResults: any = typeof searchCacheResult === 'string' ? JSON.parse(searchCacheResult) : searchCacheResult;
       
-      if (parsedResults?.items?.length > 0 && parsedResults.source !== 'youtube') {
+      const requestedSource = validated.source || 'jiosaavn';
+      const cachedSource = parsedResults.source || 'jiosaavn';
+
+      if (parsedResults?.items?.length > 0 && requestedSource === cachedSource) {
         const localIds = new Set(localCachedTracks.map((t: any) => t.videoId));
         parsedResults.items = parsedResults.items.filter((item: any) => !localIds.has(item.videoId || item.id));
         parsedResults.items = [...localCachedTracks, ...parsedResults.items];
