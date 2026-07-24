@@ -34,7 +34,7 @@ const CachedTrackSchema = new mongoose.Schema(
     cachedBy: { type: String }, // User who triggered cache
     status: {
       type: String,
-      enum: ['pending', 'processing', 'ready', 'failed'],
+      enum: ['pending', 'processing', 'ready', 'failed', 'admin_request'],
       default: 'pending',
     },
     cachedAt: { type: Date, default: Date.now },

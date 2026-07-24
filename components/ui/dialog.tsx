@@ -19,8 +19,8 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
         onClick={() => onOpenChange?.(false)}
       />
       {/* Content */}
-      <div className="relative z-10 w-full max-w-lg p-6 animate-slide-up">
-        <div className="clay-panel w-full p-8 shadow-2xl">
+      <div className="relative z-10 w-full max-w-md p-4 md:p-6 animate-slide-up">
+        <div className="clay-panel w-full p-6 shadow-2xl">
           {children}
         </div>
       </div>
@@ -30,7 +30,7 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
 
 export function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn("flex flex-col space-y-1.5 text-center sm:text-left mb-6", className)} {...props} />
+    <div className={cn("flex flex-col space-y-1.5 text-center sm:text-left mb-4", className)} {...props} />
   )
 }
 
@@ -48,6 +48,6 @@ export function DialogDescription({ className, ...props }: React.HTMLAttributes<
 
 export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-3 mt-8", className)} {...props} />
+    <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-3 mt-6", className)} {...props} />
   )
 }

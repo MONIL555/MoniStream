@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { useState } from 'react';
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import Image from 'next/image';
+import { SpotifyImportModal } from '@/components/playlist/SpotifyImportModal';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
@@ -24,8 +25,9 @@ export default function PlaylistPage() {
   const { user } = useAuth();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSpotifyModalOpen, setIsSpotifyModalOpen] = useState(false);
   
-  const { data: playlist, error, isLoading } = useSWR(id ? `/api/playlists/${id}` : null, fetcher);
+  const { data: playlist, error, isLoading, mutate } = useSWR(id ? `/api/playlists/${id}` : null, fetcher);
   const { loadPlaylist, shuffleQueue } = useQueueStore();
   const { setCurrentTrack } = usePlayerStore();
 
@@ -57,6 +59,36 @@ export default function PlaylistPage() {
     if (playlist?.tracks && playlist.tracks.length > 0) {
       const nextTrack = loadPlaylist(playlist.tracks, 0, 'playlist');
       if (nextTrack) setCurrentTrack(nextTrack);
+    }
+  };
+
+  const handleRemoveTrack = async (track: any) => {
+    try {
+      // Optimistic update
+      mutate((currentData: any) => {
+        if (!currentData) return currentData;
+        return {
+          ...currentData,
+          tracks: currentData.tracks.filter((t: any) => t.videoId !== track.videoId)
+        };
+      }, { revalidate: false });
+
+      const res = await fetch(`/api/playlists/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track, action: 'remove' })
+      });
+
+      if (res.ok) {
+        toast.success('Track removed');
+        mutate();
+      } else {
+        toast.error('Failed to remove track');
+        mutate(); // revert
+      }
+    } catch (err) {
+      toast.error('Error removing track');
+      mutate(); // revert
     }
   };
 
@@ -150,17 +182,33 @@ export default function PlaylistPage() {
           </Button>
         </div>
         
-        {user?._id === playlist.userId && (
-          <Button 
-            variant="ghost" 
-            size="icon"
-            onClick={handleDelete}
-            className="h-10 w-10 md:h-12 md:w-12 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-            title="Delete Playlist"
-          >
-            <Trash2 className="h-5 w-5" />
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {(String(user?._id) === String(playlist.userId) || (playlist.owner && String(user?._id) === String(typeof playlist.owner === 'object' ? playlist.owner._id : playlist.owner))) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsSpotifyModalOpen(true)}
+              className="text-[#1DB954] border-[#1DB954]/50 hover:bg-[#1DB954]/10 rounded-full font-semibold"
+            >
+              <svg viewBox="0 0 24 24" className="w-4 h-4 mr-2 fill-current" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.54.659.3 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15.001 10.62 18.66 12.84c.361.181.54.78.3 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.6.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
+              </svg>
+              Import from Spotify
+            </Button>
+          )}
+
+          {(String(user?._id) === String(playlist.userId) || (playlist.owner && String(user?._id) === String(typeof playlist.owner === 'object' ? playlist.owner._id : playlist.owner))) && (
+            <Button 
+              variant="ghost" 
+              size="icon"
+              onClick={handleDelete}
+              className="h-10 w-10 md:h-12 md:w-12 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              title="Delete Playlist"
+            >
+              <Trash2 className="h-5 w-5" />
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Track List */}
@@ -185,6 +233,8 @@ export default function PlaylistPage() {
                 index={i}
                 contextTracks={playlist.tracks}
                 isPlaylistContext={true}
+                currentPlaylistId={id}
+                onRemove={(String(user?._id) === String(playlist.userId) || (playlist.owner && String(user?._id) === String(typeof playlist.owner === 'object' ? playlist.owner._id : playlist.owner))) ? () => handleRemoveTrack(track) : undefined}
               />
             ))}
           </div>
@@ -207,6 +257,13 @@ export default function PlaylistPage() {
           </Button>
         </DialogFooter>
       </Dialog>
+
+      <SpotifyImportModal
+        isOpen={isSpotifyModalOpen}
+        onClose={() => setIsSpotifyModalOpen(false)}
+        playlistId={id}
+        onSuccess={() => mutate()}
+      />
     </div>
   );
 }

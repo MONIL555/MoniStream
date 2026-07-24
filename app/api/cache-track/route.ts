@@ -144,8 +144,7 @@ export async function POST(req: NextRequest) {
       }
       
       if (finalPagalNewResults.length === 0) {
-        cachedTrack.status = 'failed';
-        await cachedTrack.save();
+        await CachedTrack.deleteOne({ _id: cachedTrack._id });
         return NextResponse.json({ error: 'Song not found on PagalWorld or PagalNew' }, { status: 404 });
       }
       
@@ -168,8 +167,7 @@ export async function POST(req: NextRequest) {
       }
       
       if (!bestPNewInfo || bestPNewInfo.size <= 1500000) {
-        cachedTrack.status = 'failed';
-        await cachedTrack.save();
+        await CachedTrack.deleteOne({ _id: cachedTrack._id });
         return NextResponse.json({ error: 'Failed to scrape PagalNew song details or file too small' }, { status: 500 });
       }
       

@@ -40,7 +40,7 @@ export function NativeAudioPlayer() {
       return;
     }
 
-    if ((currentTrack.source && (currentTrack.source.endsWith('_cached') || currentTrack.source === 'admin_manual')) && currentTrack.audioUrl) {
+    if (currentTrack.audioUrl) {
       let urlToPlay = currentTrack.audioUrl;
 
       // Check if it's wrapped in our proxy

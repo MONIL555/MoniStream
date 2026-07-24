@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useRef, memo } from 'react';
 
-import { Play, Pause, MoreHorizontal, ListPlus, User } from 'lucide-react';
+import { Play, Pause, MoreHorizontal, ListPlus, User, Trash2 } from 'lucide-react';
 import { usePlayerStore } from '@/store/playerStore';
 import { motion, useAnimation } from 'framer-motion';
 import { useQueueStore } from '@/store/queueStore';
@@ -25,9 +25,10 @@ interface TrackRowProps {
   onRemove?: () => void;
   contextTracks?: any[];
   isPlaylistContext?: boolean;
+  currentPlaylistId?: string;
 }
 
-export const TrackRow = memo(function TrackRow({ track, index, showCover = true, onRemove, contextTracks, isPlaylistContext = false }: TrackRowProps) {
+export const TrackRow = memo(function TrackRow({ track, index, showCover = true, onRemove, contextTracks, isPlaylistContext = false, currentPlaylistId }: TrackRowProps) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -53,9 +54,10 @@ export const TrackRow = memo(function TrackRow({ track, index, showCover = true,
   const artist = track.artist || track.channelName || track.channelTitle || 'Unknown Artist';
   const thumbnail = typeof track.thumbnails?.default === 'string' ? track.thumbnails.default : (track.thumbnails?.default as any)?.url || track.thumbnail || '';
   const durationText = track.durationText || (track.duration ? formatDuration(track.duration) : '');
+  const isPendingAdmin = (track.source === 'admin_manual' || track.videoId?.startsWith('req_')) && !track.audioUrl;
 
   const handlePlay = () => {
-    if (isDragging) return; // Prevent click if we just finished dragging
+    if (isDragging || isPendingAdmin) return; // Prevent click if dragging or pending admin
     const isNativeTrack = !!(track.streamUrl || track.saavnId || track.videoId?.startsWith('saavn_') || track.audioUrl || (track.source && (track.source.endsWith('_cached') || track.source === 'admin_manual')));
     
     if (typeof window !== 'undefined') {
@@ -99,7 +101,10 @@ export const TrackRow = memo(function TrackRow({ track, index, showCover = true,
 
       if (isPlaylistContext && contextTracks && contextTracks.length > 0) {
         // Playlist mode: load all tracks, play in order, no autoplay
-        const playlist = contextTracks.map(t => ({
+        // Filter out admin requested tracks from the queue
+        const validContextTracks = contextTracks.filter(t => !(t.source === 'admin_manual' || t.videoId?.startsWith('req_')) || t.audioUrl);
+        
+        const playlist = validContextTracks.map(t => ({
           videoId: t.videoId,
           saavnId: t.saavnId,
           source: t.source,
@@ -167,17 +172,19 @@ export const TrackRow = memo(function TrackRow({ track, index, showCover = true,
   return (
     <div className="relative w-full rounded-xl mb-1">
       {/* Background for swipe action */}
-      <div className="absolute inset-0 bg-brand-primary/20 rounded-xl flex items-center justify-start px-4 overflow-hidden">
-        <span className="text-brand-primary font-bold text-sm flex items-center gap-2">
-          <ListPlus className="h-5 w-5" /> Add to Queue
-        </span>
-      </div>
+      {!isPendingAdmin && (
+        <div className="absolute inset-0 bg-brand-primary/20 rounded-xl flex items-center justify-start px-4 overflow-hidden">
+          <span className="text-brand-primary font-bold text-sm flex items-center gap-2">
+            <ListPlus className="h-5 w-5" /> Add to Queue
+          </span>
+        </div>
+      )}
 
       <motion.div 
-        drag="x"
+        drag={!isPendingAdmin ? "x" : false}
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={{ left: 0, right: 0.5 }}
-        onDragStart={() => setIsDragging(true)}
+        onDragStart={() => !isPendingAdmin && setIsDragging(true)}
         onDragEnd={(e, info) => {
           setTimeout(() => setIsDragging(false), 100); // delay so onClick can check it
           if (info.offset.x > 80) {
@@ -193,11 +200,13 @@ export const TrackRow = memo(function TrackRow({ track, index, showCover = true,
           }
         }}
         className={cn(
-          "relative bg-background group flex items-center gap-2 md:gap-3 px-2 md:px-3 py-1.5 md:py-2 rounded-xl cursor-pointer transition-colors duration-200",
+          "relative bg-background group flex items-center gap-2 md:gap-3 px-2 md:px-3 py-1.5 md:py-2 rounded-xl transition-colors duration-200",
           menuOpen ? "z-50" : "z-10",
           isCurrentTrack 
             ? "clay-inset bg-brand-primary/10" 
-            : "hover:bg-surface-hover"
+            : isPendingAdmin
+              ? "opacity-60"
+              : "hover:bg-surface-hover cursor-pointer"
         )}
         onClick={handlePlay}
       >
@@ -210,23 +219,30 @@ export const TrackRow = memo(function TrackRow({ track, index, showCover = true,
             alt={title}
             className="rounded-lg h-9 w-9 md:h-11 md:w-11 border-none shadow-none" 
           />
-          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            {isCurrentTrack && isPlaying ? (
-              <Pause className="h-3 w-3 md:h-4 md:w-4 text-white fill-white" />
-            ) : (
-              <Play className="h-3 w-3 md:h-4 md:w-4 text-white fill-white ml-0.5" />
-            )}
-          </div>
+          {!isPendingAdmin && (
+            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              {isCurrentTrack && isPlaying ? (
+                <Pause className="h-3 w-3 md:h-4 md:w-4 text-white fill-white" />
+              ) : (
+                <Play className="h-3 w-3 md:h-4 md:w-4 text-white fill-white ml-0.5" />
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {/* Title & Artist — takes maximum space */}
       <div className="flex-1 min-w-0 flex flex-col justify-center">
         <div className={cn(
-          "font-bold truncate text-xs md:text-sm",
+          "font-bold truncate text-xs md:text-sm flex items-center gap-2",
           isCurrentTrack ? "text-brand-primary" : "text-foreground group-hover:text-brand-primary transition-colors"
         )}>
           {title}
+          {isPendingAdmin && (
+            <span className="bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap">
+              Pending Admin
+            </span>
+          )}
         </div>
         <div className="text-[10px] md:text-xs font-semibold text-muted-foreground truncate">
           {artist}
@@ -252,26 +268,28 @@ export const TrackRow = memo(function TrackRow({ track, index, showCover = true,
           }
         >
           <div className="py-1 w-48">
-            <DropdownMenuItem onClick={(e) => {
-              // Intentionally NOT calling e.stopPropagation() so that the DropdownMenu's close handler triggers.
-              const trackData = {
-                videoId: track.videoId, title, artist,
-                channelId: track.channelId || '',
-                thumbnails: { default: thumbnail },
-                duration: track.duration || 0, durationText,
-                tags: [], playCount: 0, likeCount: 0, cachedAt: new Date().toISOString()
-              };
-              addToQueue(trackData);
-              toast.success('Added to queue');
-            }}>
-              <ListPlus className="mr-3 h-4 w-4" /> Add to queue
-            </DropdownMenuItem>
+            {!isPendingAdmin && (
+              <DropdownMenuItem onClick={(e) => {
+                // Intentionally NOT calling e.stopPropagation() so that the DropdownMenu's close handler triggers.
+                const trackData = {
+                  videoId: track.videoId, title, artist,
+                  channelId: track.channelId || '',
+                  thumbnails: { default: thumbnail },
+                  duration: track.duration || 0, durationText,
+                  tags: [], playCount: 0, likeCount: 0, cachedAt: new Date().toISOString()
+                };
+                addToQueue(trackData);
+                toast.success('Added to queue');
+              }}>
+                <ListPlus className="mr-3 h-4 w-4" /> Add to queue
+              </DropdownMenuItem>
+            )}
             
-            {playlists && playlists.length > 0 && (
+            {playlists && playlists.filter((p: any) => String(p._id) !== String(currentPlaylistId)).length > 0 && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>Add to playlist</DropdownMenuLabel>
-                {playlists.map((pl: any) => (
+                {playlists.filter((p: any) => String(p._id) !== String(currentPlaylistId)).map((pl: any) => (
                   <DropdownMenuItem key={pl._id} onClick={() => handleAddToPlaylist(pl._id)} className="pl-6">
                     {pl.name}
                   </DropdownMenuItem>
@@ -283,12 +301,11 @@ export const TrackRow = memo(function TrackRow({ track, index, showCover = true,
             <DropdownMenuItem onClick={() => router.push(`/artist/${encodeURIComponent(artist)}`)}>
               <User className="mr-3 h-4 w-4" /> Go to artist
             </DropdownMenuItem>
-            
             {onRemove && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={onRemove} className="text-destructive hover:text-destructive hover:bg-destructive/10">
-                  Remove from this list
+                  <Trash2 className="mr-3 h-4 w-4" /> Remove from this list
                 </DropdownMenuItem>
               </>
             )}

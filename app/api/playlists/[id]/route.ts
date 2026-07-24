@@ -3,6 +3,7 @@ import connectDB from '@/lib/mongodb';
 import { verifyAccessToken } from '@/lib/auth';
 import { apiLimiter, checkRateLimit, getClientIp } from '@/lib/ratelimit';
 import Playlist from '@/models/Playlist';
+import CachedTrack from '@/models/CachedTrack';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -27,6 +28,32 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }
 
+    // Enrich tracks with dynamic data from CachedTrack
+    const cachedTrackIds = playlist.tracks
+      .filter((t: any) => t.source === 'admin_manual' || t.source?.includes('_cached'))
+      .map((t: any) => t.videoId);
+
+    if (cachedTrackIds.length > 0) {
+      const cachedData = await CachedTrack.find({ videoId: { $in: cachedTrackIds } }).lean();
+      const cacheMap = new Map(cachedData.map((c: any) => [c.videoId, c]));
+
+      playlist.tracks = playlist.tracks.map((t: any) => {
+        const cacheInfo = cacheMap.get(t.videoId);
+        if (cacheInfo) {
+          // If the admin manually uploaded/resolved it, it will have status 'ready'
+          if (cacheInfo.status === 'ready' && t.source === 'admin_manual') {
+            return {
+              ...t,
+              source: cacheInfo.source || 'admin_manual_resolved',
+              audioUrl: cacheInfo.audioUrl,
+              // Remove the 'req_' prefix check issue if any by marking it resolved
+            };
+          }
+        }
+        return t;
+      });
+    }
+
     return NextResponse.json(playlist);
   } catch (error: any) {
     console.error('Playlist GET Error:', error);
@@ -45,7 +72,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const jwtUser = verifyAccessToken(token);
 
     const body = await req.json();
-    const { track } = body;
+    const { track, action } = body;
 
     if (!track || !track.videoId) return NextResponse.json({ error: 'Valid track is required' }, { status: 400 });
 
@@ -60,6 +87,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     
     if (!playlist) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
+    }
+
+    if (action === 'remove') {
+      playlist.tracks = playlist.tracks.filter((t: any) => t.videoId !== track.videoId);
+      await playlist.save();
+      return NextResponse.json(playlist);
     }
 
     // Add track to playlist if it's not already there

@@ -11,7 +11,7 @@ const fetcher = (url: string) => fetch(url).then(res => res.json());
 
 export default function AdminCachedTracksPage() {
   const { user } = useAuth();
-  const [filter, setFilter] = useState<'all' | 'ready' | 'failed' | 'processing'>('all');
+  const [filter, setFilter] = useState<'all' | 'ready' | 'failed' | 'processing' | 'admin_request'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Manual Add State
@@ -79,6 +79,7 @@ export default function AdminCachedTracksPage() {
       case 'ready': return <span className="flex items-center gap-1 text-emerald-400 text-xs bg-emerald-400/10 px-2 py-1 rounded-full w-fit"><CheckCircle2 className="w-3 h-3" /> Ready</span>;
       case 'failed': return <span className="flex items-center gap-1 text-red-400 text-xs bg-red-400/10 px-2 py-1 rounded-full w-fit"><XCircle className="w-3 h-3" /> Failed</span>;
       case 'processing': return <span className="flex items-center gap-1 text-amber-400 text-xs bg-amber-400/10 px-2 py-1 rounded-full w-fit"><RefreshCw className="w-3 h-3 animate-spin" /> Processing</span>;
+      case 'admin_request': return <span className="flex items-center gap-1 text-purple-400 text-xs bg-purple-400/10 px-2 py-1 rounded-full w-fit"><Plus className="w-3 h-3" /> Requested</span>;
       default: return <span className="text-muted-foreground text-xs">{status}</span>;
     }
   };
@@ -113,7 +114,7 @@ export default function AdminCachedTracksPage() {
           />
         </div>
         <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-          {(['all', 'ready', 'failed', 'processing'] as const).map(f => (
+          {(['all', 'ready', 'failed', 'processing', 'admin_request'] as const).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
