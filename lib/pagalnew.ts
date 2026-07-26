@@ -102,20 +102,24 @@ export async function scrapePagalNewSongPage(url: string): Promise<PagalNewSongD
     const title = titleEl ? titleEl.text.trim() : 'Unknown Title';
 
     // Extract metadata
-    // Often in <div class="list-group"> -> <div class="list-group-item">
+    // Often in <b> tags
     let album = '';
     let singers = '';
     let releaseDate = '';
 
-    const listItems = root.querySelectorAll('.list-group-item');
-    for (const item of listItems) {
-      const text = item.text;
-      if (text.includes('Album')) {
-        album = item.querySelector('a')?.text.trim() || '';
-      } else if (text.includes('Singer')) {
-        singers = item.querySelectorAll('a').map(a => a.text.trim()).join(', ');
-      } else if (text.includes('Release')) {
-        releaseDate = text.replace('Release:', '').trim();
+    const bTags = root.querySelectorAll('b');
+    for (const b of bTags) {
+      const bText = b.text.trim();
+      if (bText.includes('Album:')) {
+        const nextSibling = b.nextSibling;
+        if (nextSibling && nextSibling.nodeType === 3) {
+          album = nextSibling.text.trim();
+        }
+      } else if (bText.includes('Singer(s):') || bText.includes('Singer:')) {
+        const nextSibling = b.nextSibling;
+        if (nextSibling && nextSibling.nodeType === 3) {
+          singers = nextSibling.text.trim();
+        }
       }
     }
 
@@ -182,28 +186,32 @@ async function resolveRedirect(url: string): Promise<string | null> {
  * Downloads the MP3 from PagalNew and uploads it to Firebase Storage.
  */
 export async function cachePagalNewSongAudio(songDetails: PagalNewSongDetails, videoId: string) {
-  let downloadUrl = songDetails.downloadUrl128 || songDetails.downloadUrl320;
+  let downloadUrl = songDetails.downloadUrl320 || songDetails.downloadUrl128;
   
   if (!downloadUrl) {
     throw new Error('No download URL found on PagalNew page');
   }
 
   // We will no longer upload to Firebase Storage to bypass costs.
-  // Instead, we fetch just the headers to get the file size.
-  const response = await fetch(downloadUrl, {
-    method: 'HEAD',
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Referer': 'https://pagalnew.com/'
-    },
-  });
+  // Instead, we try to fetch just the headers to get the file size.
+  // If Cloudflare blocks HEAD requests, we gracefully fallback to size 0.
+  let sizeBytes = 0;
+  try {
+    const response = await fetch(downloadUrl, {
+      method: 'HEAD',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://pagalnew.com/'
+      },
+    });
 
-  if (!response.ok) {
-    throw new Error(`Failed to access audio from PagalNew: ${response.statusText}`);
+    if (response.ok) {
+      const contentLength = response.headers.get('content-length');
+      sizeBytes = contentLength ? parseInt(contentLength, 10) : 0;
+    }
+  } catch (e) {
+    console.warn(`[PagalNew] HEAD request failed, falling back to size 0 for ${downloadUrl}`);
   }
-
-  const contentLength = response.headers.get('content-length');
-  const sizeBytes = contentLength ? parseInt(contentLength, 10) : 0;
   
   // Return the raw MP3 URL to bypass proxy issues
   const bitrateStr = downloadUrl.includes('320') ? 320 : 128;

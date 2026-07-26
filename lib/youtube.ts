@@ -83,11 +83,11 @@ export async function searchYouTube(
       .map((item: Record<string, Record<string, unknown>>) => ({
         videoId: (item.id as Record<string, string>).videoId || (item.id as Record<string, string>).playlistId || (item.id as Record<string, string>).channelId,
         type: (item.id as Record<string, string>).kind?.replace('youtube#', '') || 'video',
-        title: decodeHTMLEntities(
+        title: cleanYouTubeTitle(decodeHTMLEntities(
           (item.snippet as Record<string, string>).title
-        ),
+        )),
         channelId: (item.snippet as Record<string, string>).channelId,
-        channelName: (item.snippet as Record<string, string>).channelTitle,
+        channelName: cleanYouTubeArtist((item.snippet as Record<string, string>).channelTitle),
         thumbnail:
           ((item.snippet as Record<string, Record<string, Record<string, string>>>).thumbnails?.high
             ?.url) ||
@@ -133,9 +133,9 @@ export async function getRelatedVideos(
       ?.filter((item: any) => item.id?.videoId)
       .map((item: any) => ({
         videoId: item.id.videoId,
-        title: decodeHTMLEntities(item.snippet.title),
+        title: cleanYouTubeTitle(decodeHTMLEntities(item.snippet.title)),
         channelId: item.snippet.channelId,
-        channelName: item.snippet.channelTitle,
+        channelName: cleanYouTubeArtist(item.snippet.channelTitle),
         thumbnail: item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.default?.url || '',
         publishedAt: item.snippet.publishedAt,
       })) || [],
@@ -179,9 +179,9 @@ export async function getVideoDetails(
 
         return {
           videoId: item.id as unknown as string,
-          title: decodeHTMLEntities(snippet.title as string),
+          title: cleanYouTubeTitle(decodeHTMLEntities(snippet.title as string)),
           channelId: snippet.channelId as string,
-          channelTitle: snippet.channelTitle as string,
+          channelTitle: cleanYouTubeArtist(snippet.channelTitle as string),
           description: snippet.description as string,
           thumbnail: thumbnails?.high?.url || thumbnails?.default?.url || '',
           thumbnails: {
@@ -303,6 +303,17 @@ function decodeHTMLEntities(text: string): string {
     .replace(/&#x2F;/g, '/');
 }
 
+export function cleanYouTubeArtist(name: string): string {
+  return name.replace(/ - Topic$/i, '').replace(/VEVO$/i, '').trim();
+}
+
+export function cleanYouTubeTitle(title: string): string {
+  return title
+    .replace(/\(.*?(official|lyrical|video|audio|full song).*?\)/gi, '')
+    .replace(/\[.*?(official|lyrical|video|audio|full song).*?\]/gi, '')
+    .trim();
+}
+
 // ─── Get Playlist Details ──────────────────────────────────────
 
 export async function getPlaylistDetails(playlistId: string) {
@@ -356,9 +367,9 @@ export async function getPlaylistItems(playlistId: string, maxResults = 50) {
     ?.filter((item: any) => item.contentDetails?.videoId)
     .map((item: any) => ({
       videoId: item.contentDetails.videoId,
-      title: decodeHTMLEntities(item.snippet.title),
+      title: cleanYouTubeTitle(decodeHTMLEntities(item.snippet.title)),
       channelId: item.snippet.videoOwnerChannelId,
-      channelTitle: item.snippet.videoOwnerChannelTitle,
+      channelTitle: cleanYouTubeArtist(item.snippet.videoOwnerChannelTitle || ''),
       thumbnailUrl: item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.default?.url,
       position: item.snippet.position,
       publishedAt: item.contentDetails.videoPublishedAt,

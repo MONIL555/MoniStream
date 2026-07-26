@@ -199,20 +199,24 @@ export async function cacheSongAudio(
   }
 
   // We will no longer upload to Firebase Storage to bypass costs.
-  // Instead, we fetch just the headers to get the file size.
-  const response = await fetch(downloadUrl, {
-    method: 'HEAD',
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    },
-  });
+  // Instead, we try to fetch just the headers to get the file size.
+  // If Cloudflare blocks HEAD requests, we gracefully fallback to size 0.
+  let size = 0;
+  try {
+    const response = await fetch(downloadUrl, {
+      method: 'HEAD',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+    });
 
-  if (!response.ok) {
-    throw new Error(`Failed to access MP3 from PagalWorld: ${response.status}`);
+    if (response.ok) {
+      const contentLength = response.headers.get('content-length');
+      size = contentLength ? parseInt(contentLength, 10) : 0;
+    }
+  } catch (e) {
+    console.warn(`[PagalWorld] HEAD request failed, falling back to size 0 for ${downloadUrl}`);
   }
-
-  const contentLength = response.headers.get('content-length');
-  const size = contentLength ? parseInt(contentLength, 10) : 0;
   // Use the raw downloadUrl directly to bypass proxy issues
   // The browser will stream the audio natively without CORS issues
   return {

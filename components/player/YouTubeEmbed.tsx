@@ -175,7 +175,7 @@ export function YouTubeEmbed() {
   // 3.5 Auto-Swap to Cached Version (If available)
   // ══════════════════════════════════════════════════════════════
   useEffect(() => {
-    if (isActive && currentTrack && currentTrack.source === 'youtube') {
+    if (isActive && currentTrack) {
       // Skip if we've already checked this videoId this session
       if (cacheCheckedIds.current.has(currentTrack.videoId)) return;
       cacheCheckedIds.current.add(currentTrack.videoId);
@@ -239,14 +239,29 @@ export function YouTubeEmbed() {
   }, [volume, isMuted]);
 
   // ══════════════════════════════════════════════════════════════
-  // 6. Time Tracking Loop & PagalWorld Cache Trigger
+  // 6. Time Tracking Loop & Speculative Pre-Cache
   // ══════════════════════════════════════════════════════════════
-  const cacheRequestedRef = useRef(false);
+  // Flow: At ~5s → fire speculative POST (background search/scrape)
+  //       At 30s → confirm + swap to cached track
+  //       Skip before 30s → abort, nothing gets cached
+  // ══════════════════════════════════════════════════════════════
+  const speculativeFiredRef = useRef(false);
+  const speculativeResultRef = useRef<{ audioUrl?: string; status?: string; error?: string } | null>(null);
+  const speculativeAbortRef = useRef<AbortController | null>(null);
+  const cacheConfirmedRef = useRef(false);
   const historyAddedRef = useRef(false);
 
   useEffect(() => {
-    cacheRequestedRef.current = false;
+    // Reset all refs when track changes
+    speculativeFiredRef.current = false;
+    speculativeResultRef.current = null;
+    cacheConfirmedRef.current = false;
     historyAddedRef.current = false;
+    // Abort any in-flight speculative request from previous track
+    if (speculativeAbortRef.current) {
+      speculativeAbortRef.current.abort();
+      speculativeAbortRef.current = null;
+    }
   }, [currentTrack?.videoId]);
 
   useEffect(() => {
@@ -271,17 +286,17 @@ export function YouTubeEmbed() {
               } catch (e) { /* ignore */ }
             }
 
-            // Task 2: Add to history after 30 seconds
+            // Add to history after 30 seconds
             if (t >= 30 && !historyAddedRef.current && currentTrack) {
                historyAddedRef.current = true;
                useHistoryStore.getState().addToHistory(currentTrack);
             }
             
-            // Check for caching after 30 seconds
-            if (t >= 30 && !cacheRequestedRef.current && currentTrack) {
-              cacheRequestedRef.current = true;
-              
-              toast('🎵 Caching this song for lockscreen playback...', { duration: 3000 });
+            // ── Speculative pre-cache at ~5 seconds ──
+            if (t >= 5 && !speculativeFiredRef.current && currentTrack) {
+              speculativeFiredRef.current = true;
+              const abortController = new AbortController();
+              speculativeAbortRef.current = abortController;
               
               fetch('/api/cache-track', {
                 method: 'POST',
@@ -289,38 +304,140 @@ export function YouTubeEmbed() {
                 body: JSON.stringify({
                   videoId: currentTrack.videoId,
                   title: currentTrack.title,
-                  artist: currentTrack.artist
-                })
+                  artist: currentTrack.artist,
+                  duration: currentTrack.duration,
+                  speculative: true,
+                }),
+                signal: abortController.signal,
               })
               .then(res => res.json())
               .then(data => {
-                if (data.status === 'ready') {
-                      toast.success(`✅ "${currentTrack.title}" is now available with full lockscreen support!`);
-                   if (data.audioUrl) {
-                     const store = usePlayerStore.getState();
-                     const t = store.currentTime;
-                     store.swapToCachedTrack({
-                       ...currentTrack,
-                       source: data.source || 'pagalworld_cached',
-                       audioUrl: data.audioUrl,
-                     });
-                     mutate(
-                       (key) => typeof key === 'string' && (key.includes('/api/search') || key.includes('/api/library') || key.includes('/api/admin')),
-                       undefined,
-                       { revalidate: true }
-                     );
-                     
-                     setTimeout(() => {
-                       if (typeof (window as any).seekTo === 'function') {
-                         (window as any).seekTo(t);
-                       }
-                     }, 200);
-                   }
-                } else if (data.error) {
-                      toast.error(`⚠️ Song couldn't be cached — lockscreen won't work for this track`);
-                }
+                speculativeResultRef.current = data;
+                console.log(`[Pre-cache] Speculative result for "${currentTrack.title}": ${data.status}`);
               })
-              .catch(err => console.error('Failed to trigger cache:', err));
+              .catch(err => {
+                if (err.name !== 'AbortError') {
+                  console.error('[Pre-cache] Speculative cache failed:', err);
+                }
+              });
+            }
+            
+            // ── Confirm + swap at 30 seconds ──
+            if (t >= 30 && !cacheConfirmedRef.current && currentTrack) {
+              cacheConfirmedRef.current = true;
+              
+              const doConfirmAndSwap = async () => {
+                // Wait for speculative result if it hasn't arrived yet
+                let result = speculativeResultRef.current;
+                if (!result && speculativeFiredRef.current) {
+                  // Poll briefly for the result (speculative request still in flight)
+                  for (let i = 0; i < 30; i++) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    result = speculativeResultRef.current;
+                    if (result) break;
+                  }
+                }
+                
+                if (!result) {
+                  // Speculative request never completed — fall back to direct cache
+                  toast('🎵 Caching this song for lockscreen playback...', { duration: 3000 });
+                  try {
+                    const res = await fetch('/api/cache-track', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        videoId: currentTrack.videoId,
+                        title: currentTrack.title,
+                        artist: currentTrack.artist,
+                        duration: currentTrack.duration,
+                        speculative: false,
+                      }),
+                    });
+                    result = await res.json();
+                  } catch (err) {
+                    console.error('Failed to cache track:', err);
+                    toast.error(`⚠️ Song couldn't be cached — lockscreen won't work for this track`);
+                    return;
+                  }
+                }
+
+                // If speculative/ready, confirm it
+                if (result && (result.status === 'speculative' || result.status === 'ready')) {
+                  if (result.status === 'speculative') {
+                    // Confirm: flip speculative → ready
+                    try {
+                      const confirmRes = await fetch('/api/cache-track/confirm', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ videoId: currentTrack.videoId }),
+                      });
+                      const confirmData = await confirmRes.json();
+                      if (confirmData.status === 'ready') {
+                        result = confirmData;
+                      }
+                    } catch (err) {
+                      console.error('Failed to confirm cache:', err);
+                    }
+                  }
+
+                  if (result!.audioUrl) {
+                    toast.success(`✅ "${currentTrack.title}" is now available with full lockscreen support!`);
+                    const store = usePlayerStore.getState();
+                    const currentT = store.currentTime;
+                    store.swapToCachedTrack({
+                      ...currentTrack,
+                      source: 'pagalworld_cached',
+                      audioUrl: result!.audioUrl,
+                    });
+                    mutate(
+                      (key) => typeof key === 'string' && (key.includes('/api/search') || key.includes('/api/library') || key.includes('/api/admin')),
+                      undefined,
+                      { revalidate: true }
+                    );
+                    setTimeout(() => {
+                      if (typeof (window as any).seekTo === 'function') {
+                        (window as any).seekTo(currentT);
+                      }
+                    }, 200);
+                  }
+                } else if (result && result.status === 'processing') {
+                  // Still processing — poll until ready
+                  toast('🎵 Caching this song for lockscreen playback...', { duration: 3000 });
+                  for (let i = 0; i < 12; i++) {
+                    await new Promise(r => setTimeout(r, 5000));
+                    try {
+                      const statusRes = await fetch(`/api/cache-track?videoId=${currentTrack.videoId}`);
+                      const statusData = await statusRes.json();
+                      if (statusData.status === 'ready' && statusData.track?.audioUrl) {
+                        toast.success(`✅ "${currentTrack.title}" is now available with full lockscreen support!`);
+                        const store = usePlayerStore.getState();
+                        const currentT = store.currentTime;
+                        store.swapToCachedTrack({
+                          ...currentTrack,
+                          source: statusData.track.source || 'pagalworld_cached',
+                          audioUrl: statusData.track.audioUrl,
+                        });
+                        mutate(
+                          (key) => typeof key === 'string' && (key.includes('/api/search') || key.includes('/api/library') || key.includes('/api/admin')),
+                          undefined,
+                          { revalidate: true }
+                        );
+                        setTimeout(() => {
+                          if (typeof (window as any).seekTo === 'function') {
+                            (window as any).seekTo(currentT);
+                          }
+                        }, 200);
+                        return;
+                      }
+                    } catch { /* continue polling */ }
+                  }
+                  toast.error(`⚠️ Song couldn't be cached — lockscreen won't work for this track`);
+                } else if (result && result.error) {
+                  toast.error(`⚠️ Song couldn't be cached — lockscreen won't work for this track`);
+                }
+              };
+
+              doConfirmAndSwap();
             }
           }
         } catch { /* ignore */ }

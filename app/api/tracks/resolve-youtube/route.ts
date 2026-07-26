@@ -14,7 +14,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Title and artist are required' }, { status: 400 });
     }
 
-    const cleanTitle = title.replace(/\(.*?\)|\[.*?\]|Lyrical|Official|Video|Audio/gi, '').trim();
+    const cleanTitle = title
+      .replace(/\(.*?(Lyrical|Official|Video|Audio).*?\)/gi, '')
+      .replace(/\[.*?(Lyrical|Official|Video|Audio).*?\]/gi, '').trim();
     const mainArtist = artist.split(',')[0].trim();
     
     const query = `${cleanTitle} ${mainArtist}`.trim();

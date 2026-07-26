@@ -8,91 +8,7 @@ import { searchSaavn } from '@/lib/jiosaavn';
 import { formatDurationText } from '@/lib/youtube';
 import { Track } from '@/types';
 
-// ─── Helpers ─────────────────────────────────────────────────
-
-/** Normalize a string for comparison: lowercase, strip parens/brackets, trim */
-function normalize(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/\(.*?\)|\[.*?\]/g, '')
-    .replace(/lyrical|official|video|audio|full song|hd|unplugged|reprise|remix|lofi|mash\s*up|acoustic/gi, '')
-    .replace(/[^\w\s]/g, '')
-    .trim()
-    .replace(/\s+/g, ' ');
-}
-
-/** Get individual meaningful words from a string */
-function getWords(s: string): string[] {
-  return normalize(s).split(' ').filter((w: string) => w.length > 1);
-}
-
-/** 
- * Score how well two titles match (0-1). 
- * Uses token overlap — the fraction of query words found in the candidate. 
- */
-function titleScore(query: string, candidate: string): number {
-  const qWords = getWords(query);
-  const cWords = getWords(candidate);
-  if (qWords.length === 0) return 0;
-
-  // Check exact normalized match first
-  if (normalize(query) === normalize(candidate)) return 1.0;
-
-  // Token overlap
-  let matched = 0;
-  for (const qw of qWords) {
-    if (cWords.some((cw: string) => cw === qw || cw.includes(qw) || qw.includes(cw))) {
-      matched++;
-    }
-  }
-  const overlap = matched / qWords.length;
-
-  // Penalize if candidate has many extra words (likely a different song variant)
-  const extraPenalty = cWords.length > qWords.length * 2 ? 0.15 : 0;
-
-  return Math.max(0, overlap - extraPenalty);
-}
-
-/** Score how well artists match (0-1). Checks if any artist word overlaps. */
-function artistScore(queryArtist: string, candidateArtist: string): number {
-  const qWords = getWords(queryArtist);
-  const cWords = getWords(candidateArtist);
-  if (qWords.length === 0) return 0.5; // No artist info, neutral
-
-  let matched = 0;
-  for (const qw of qWords) {
-    if (qw.length > 2 && cWords.some((cw: string) => cw === qw || cw.includes(qw) || qw.includes(cw))) {
-      matched++;
-    }
-  }
-  return matched > 0 ? Math.min(1.0, matched / Math.min(qWords.length, 3)) : 0;
-}
-
-/** 
- * Score duration proximity (0-1). 
- * Perfect match = 1.0, >20% off = 0.0 
- */
-function durationScore(expected: number, actual: number): number {
-  if (expected <= 0 || actual <= 0) return 0.5; // No duration info, neutral
-  const diff = Math.abs(expected - actual);
-  const tolerance = expected * 0.20; // 20% tolerance
-  if (diff <= 5) return 1.0; // Within 5 seconds = perfect
-  if (diff > tolerance) return 0.0; // Too far off
-  return 1.0 - (diff / tolerance);
-}
-
-/** Composite score with weighted factors */
-function compositeScore(
-  queryTitle: string, queryArtist: string, expectedDuration: number,
-  candidateTitle: string, candidateArtist: string, candidateDuration: number
-): number {
-  const ts = titleScore(queryTitle, candidateTitle);
-  const as = artistScore(queryArtist, candidateArtist);
-  const ds = durationScore(expectedDuration, candidateDuration);
-
-  // Weights: title is most important, then duration (to filter wrong versions), then artist
-  return (ts * 0.45) + (ds * 0.35) + (as * 0.20);
-}
+import { compositeScore } from '@/lib/scoring';
 
 // ─── Main Handler ────────────────────────────────────────────
 
@@ -128,7 +44,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     // ─── Multi-Strategy JioSaavn Search ──────────────────────
 
-    const cleanTitle = title.replace(/\(.*?\)|\[.*?\]|Lyrical|Official|Video|Audio/gi, '').trim();
+    const cleanTitle = title
+      .replace(/\(.*?(Lyrical|Official|Video|Audio).*?\)/gi, '')
+      .replace(/\[.*?(Lyrical|Official|Video|Audio).*?\]/gi, '').trim();
     const mainArtist = artist.split(',')[0].trim();
     
     // Try multiple search queries to maximize hits
@@ -211,6 +129,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               videoId: deterministicId,
               title: cleanTitle,
               artist: mainArtist,
+              duration,
               userId: jwtUser.userId,
             }),
           });
