@@ -130,7 +130,7 @@ export function artistScore(queryArtist: string, candidateArtist: string): numbe
 export function durationScore(expected: number, actual: number): number {
   if (expected <= 0 || actual <= 0) return 0.5;
   const diff = Math.abs(expected - actual);
-  const tolerance = expected * 0.20;
+  const tolerance = expected * 0.35;
   if (diff <= 5) return 1.0;
   if (diff > tolerance) return 0.0;
   return 1.0 - (diff / tolerance);

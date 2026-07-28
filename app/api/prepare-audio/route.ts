@@ -229,7 +229,7 @@ export async function POST(req: NextRequest) {
           try {
             const info = await cacheSongAudio(details, videoId);
             if (info) {
-              const estimatedDuration = duration; // Never estimate from file size because embedded album art skews the calculation heavily
+              const estimatedDuration = info.size > 0 ? (Math.max(0, info.size - 150000) * 8) / (info.bitrate * 1000) : duration;
               const score = compositeScore(
                 baseTitle, combinedArtistContext, duration,
                 details.title, details.singers || '', estimatedDuration
