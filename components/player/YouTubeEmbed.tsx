@@ -181,7 +181,7 @@ export function YouTubeEmbed() {
       cacheCheckedIds.current.add(currentTrack.videoId);
 
       // Check if it's already cached in the database
-      fetch(`/api/cache-track?videoId=${currentTrack.videoId}`)
+      fetch(`/api/prepare-audio?videoId=${currentTrack.videoId}`)
         .then(res => res.json())
         .then(data => {
           if (data.status === 'ready' && data.track && data.track.audioUrl) {
@@ -298,14 +298,14 @@ export function YouTubeEmbed() {
               const abortController = new AbortController();
               speculativeAbortRef.current = abortController;
               
-              fetch('/api/cache-track', {
+              fetch('/api/prepare-audio', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   videoId: currentTrack.videoId,
                   title: currentTrack.title,
                   artist: currentTrack.artist,
-                  duration: currentTrack.duration,
+                  duration: currentTrack.duration || (isFinite(duration) ? duration : 0),
                   speculative: true,
                 }),
                 signal: abortController.signal,
@@ -342,14 +342,14 @@ export function YouTubeEmbed() {
                   // Speculative request never completed — fall back to direct cache
                   toast('🎵 Caching this song for lockscreen playback...', { duration: 3000 });
                   try {
-                    const res = await fetch('/api/cache-track', {
+                    const res = await fetch('/api/prepare-audio', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
                         videoId: currentTrack.videoId,
                         title: currentTrack.title,
                         artist: currentTrack.artist,
-                        duration: currentTrack.duration,
+                        duration: currentTrack.duration || (isFinite(duration) ? duration : 0),
                         speculative: false,
                       }),
                     });
@@ -366,7 +366,7 @@ export function YouTubeEmbed() {
                   if (result.status === 'speculative') {
                     // Confirm: flip speculative → ready
                     try {
-                      const confirmRes = await fetch('/api/cache-track/confirm', {
+                      const confirmRes = await fetch('/api/prepare-audio/confirm', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ videoId: currentTrack.videoId }),
@@ -406,8 +406,8 @@ export function YouTubeEmbed() {
                   for (let i = 0; i < 12; i++) {
                     await new Promise(r => setTimeout(r, 5000));
                     try {
-                      const statusRes = await fetch(`/api/cache-track?videoId=${currentTrack.videoId}`);
-                      const statusData = await statusRes.json();
+                      const res = await fetch(`/api/prepare-audio?videoId=${currentTrack.videoId}`);
+                      const statusData = await res.json();
                       if (statusData.status === 'ready' && statusData.track?.audioUrl) {
                         toast.success(`✅ "${currentTrack.title}" is now available with full lockscreen support!`);
                         const store = usePlayerStore.getState();

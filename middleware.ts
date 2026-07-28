@@ -7,6 +7,7 @@ const publicPaths = [
   '/forgot-password',
   '/api/auth',
   '/api/config',
+  '/api/prepare-audio',
 ];
 
 export function middleware(request: NextRequest) {

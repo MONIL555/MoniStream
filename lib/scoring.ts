@@ -149,7 +149,12 @@ export function compositeScore(
   
   // Heavily penalise if a specific artist was queried but the candidate artist doesn't match at all
   if (getWords(queryArtist).length > 0 && getWords(candidateArtist).length > 0 && as === 0) {
-    score *= 0.6; // Cut score heavily to avoid caching random covers or wrong songs
+    if (ts > 0.9) {
+      // If the title is an exact match, the YouTube artist might just be the label (e.g. T-Series)
+      score *= 0.7;
+    } else {
+      score *= 0.6; // Cut score heavily to avoid caching random covers or wrong songs
+    }
   }
   
   return score;

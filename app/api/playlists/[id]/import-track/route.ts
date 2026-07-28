@@ -122,7 +122,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       } else {
         // Not cached yet — trigger caching
         try {
-          const cacheRes = await fetch(new URL('/api/cache-track', req.url).toString(), {
+          const cacheRes = await fetch(new URL('/api/prepare-audio', req.url).toString(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

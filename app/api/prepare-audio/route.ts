@@ -24,10 +24,32 @@ function verifyCandidateAgainstSaavn(
   candidateTitle: string,
   candidateArtist: string,
   candidateDuration: number,
-  saavnResults: any[]
+  saavnResults: any[],
+  originalTitle: string,
+  originalArtist: string,
+  originalDuration: number
 ): { verified: boolean; bestScore: number; matchedTitle?: string } {
   if (saavnResults.length === 0) {
     // JioSaavn unavailable — skip verification, rely on scoring alone
+    return { verified: true, bestScore: 0 };
+  }
+
+  // First, check if JioSaavn even found the correct original song
+  let maxOriginalScore = 0;
+  for (const saavnTrack of saavnResults) {
+    const score = compositeScore(
+      originalTitle, originalArtist, originalDuration,
+      saavnTrack.title, saavnTrack.artist, saavnTrack.duration || 0
+    );
+    if (score > maxOriginalScore) {
+      maxOriginalScore = score;
+    }
+  }
+
+  // If JioSaavn didn't find any track that strongly matches the original request,
+  // we cannot use JioSaavn as a source of ground truth to reject the candidate.
+  if (maxOriginalScore < 0.40) {
+    console.log(`[JioSaavn Verification] JioSaavn didn't find a strong match for original request (max score: ${maxOriginalScore.toFixed(3)}). Skipping verification.`);
     return { verified: true, bestScore: 0 };
   }
 
@@ -53,7 +75,7 @@ function verifyCandidateAgainstSaavn(
 }
 
 // Minimum composite score for accepting a candidate
-const MIN_SCORE_THRESHOLD = 0.55;
+const MIN_SCORE_THRESHOLD = 0.50;
 
 export async function GET(req: NextRequest) {
   try {
@@ -126,19 +148,25 @@ export async function POST(req: NextRequest) {
     const baseTitleMatch = title.match(/^([^-|]+)/);
     let baseTitle = baseTitleMatch ? baseTitleMatch[1].trim() : title;
     baseTitle = baseTitle.replace(/\(.*?(Lyrical|Official|Video|Audio|Full Song|HD|Jhankar|Remix).*?\)/gi, '')
-                         .replace(/\[.*?(Lyrical|Official|Video|Audio|Full Song|HD|Jhankar|Remix).*?\]/gi, '').trim();
+                         .replace(/\[.*?(Lyrical|Official|Video|Audio|Full Song|HD|Jhankar|Remix).*?\]/gi, '')
+                         .replace(/\b(Lyrical Video|Official Video|Full Video Song|Video Song|Full Song|Audio Song|HD|Jhankar|Remix|Lyrical|Official)\b/gi, '')
+                         .replace(/\s+/g, ' ')
+                         .trim();
 
     const cleanTitle = title
       .replace(/\(.*?(Lyrical|Official|Video|Audio|Full Song|HD|Jhankar|Remix).*?\)/gi, '')
       .replace(/\[.*?(Lyrical|Official|Video|Audio|Full Song|HD|Jhankar|Remix).*?\]/gi, '')
-      .replace(/- Topic/i, '').trim();
+      .replace(/\b(Lyrical Video|Official Video|Full Video Song|Video Song|Full Song|Audio Song|HD|Jhankar|Remix|Lyrical|Official)\b/gi, '')
+      .replace(/- Topic/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
     let cleanArtist = artist.replace(/- Topic/i, '').replace(/VEVO/i, '').trim();
     
     const query = `${cleanTitle} ${cleanArtist}`.trim();
     
     let smartQuery = '';
     const genericRegex = /lyrical|official|video|audio|full song|hd|jhankar|remix|dance songs/i;
-    const titleParts = title.split(/[-|]/).map((p: string) => p.trim()).filter((p: string) => p && !genericRegex.test(p));
+    const titleParts = title.split(/[-|]/).map((p: string) => p.trim()).filter((p: string, i: number) => p && (i === 0 || !genericRegex.test(p)));
     
     if (titleParts.length > 1) {
        // Take the second valid part (which could be movie name or artists)
@@ -201,7 +229,7 @@ export async function POST(req: NextRequest) {
           try {
             const info = await cacheSongAudio(details, videoId);
             if (info) {
-              const estimatedDuration = info.size > 0 ? info.size / (info.bitrate * 125) : duration;
+              const estimatedDuration = duration; // Never estimate from file size because embedded album art skews the calculation heavily
               const score = compositeScore(
                 baseTitle, combinedArtistContext, duration,
                 details.title, details.singers || '', estimatedDuration
@@ -210,7 +238,8 @@ export async function POST(req: NextRequest) {
               
               // JioSaavn verification
               const verification = verifyCandidateAgainstSaavn(
-                details.title, details.singers || '', estimatedDuration, saavnReference
+                details.title, details.singers || '', estimatedDuration, saavnReference,
+                baseTitle, combinedArtistContext, duration
               );
               console.log(`[Cache Track] JioSaavn verification: verified=${verification.verified}, score=${verification.bestScore.toFixed(3)}, matched="${verification.matchedTitle || 'N/A'}"`);
 
@@ -296,7 +325,7 @@ export async function POST(req: NextRequest) {
               if (info) {
                 // If HEAD request was blocked by Cloudflare, info.size will be 0.
                 // In that case, we fall back to the YouTube video duration.
-                const estimatedDuration = info.size > 0 ? info.size / (info.bitrate * 125) : duration;
+                const estimatedDuration = duration;
                 
                 const score = compositeScore(
                   baseTitle, combinedArtistContext, duration,
@@ -306,7 +335,8 @@ export async function POST(req: NextRequest) {
                 
                 // JioSaavn verification
                 const verification = verifyCandidateAgainstSaavn(
-                  details.title, details.singers || '', estimatedDuration, saavnReference
+                  details.title, details.singers || '', estimatedDuration, saavnReference,
+                  baseTitle, combinedArtistContext, duration
                 );
                 console.log(`[Cache Track] JioSaavn verification: verified=${verification.verified}, score=${verification.bestScore.toFixed(3)}, matched="${verification.matchedTitle || 'N/A'}"`);
 

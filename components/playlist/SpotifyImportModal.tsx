@@ -209,8 +209,8 @@ export function SpotifyImportModal({ isOpen, onClose, playlistId, onSuccess }: S
           const ytTrack = data.track;
           toast.info('Found on YouTube! Attempting to cache...', { id: 'cache-toast' });
           
-          // 2. Start caching
-          const cacheRes = await fetch('/api/cache-track', {
+          // 3. Cache the track via our caching API
+          const cacheRes = await fetch('/api/prepare-audio', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
