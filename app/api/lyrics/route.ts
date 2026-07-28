@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiLimiter, checkRateLimit, getClientIp } from '@/lib/ratelimit';
 
+export const dynamic = 'force-dynamic';
+
 const SAAVN_API_BASE = 'https://saavn.dev/api';
 
 function cleanTitle(title: string) {
@@ -27,9 +29,16 @@ function cleanTitle(title: string) {
     .replace(/-\s*\d+\s*kbps/gi, '')
     // Remove things after dash that are clearly video suffixes
     .replace(/-(?:\s)*(?:Official|Lyrical|Audio|Video|8K|4K|HD|HQ).*/i, '')
+    // Remove unparenthesized video/audio tags that commonly pollute YouTube titles
+    .replace(/\b(?:(?:Full|Official|Lyrical|Original|Exclusive)(?:\s+(?:Video|Audio|Song))+|Video\s+Song|Audio\s+Song|Lyrical|Official)\b/gi, '')
+    // Remove ellipses (e.g. "...") which often happen due to title truncation
+    .replace(/[.]{2,}/g, '')
     // Remove anything after pipe
     .replace(/\|.*/g, '')
     .trim();
+
+  // Clean up any double spaces left behind
+  cleaned = cleaned.replace(/\s{2,}/g, ' ');
 
   return cleaned;
 }
@@ -80,27 +89,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Track title is required' }, { status: 400 });
     }
 
-    // 0. Try JioSaavn lyrics first if we have a saavnId
-    if (saavnId && (source === 'jiosaavn' || saavnId)) {
-      const saavnLyrics = await fetchSaavnLyrics(saavnId);
-      if (saavnLyrics) {
-        return NextResponse.json({
-          plainLyrics: saavnLyrics,
-          syncedLyrics: null,
-          source: 'jiosaavn',
-        }, {
-          headers: { 'Cache-Control': 's-maxage=86400, stale-while-revalidate=172800' },
-        });
-      }
-    }
-
     // 1. Clean title and artist for lrclib lookup
     const track = cleanTitle(rawTrack);
     const cleanArt = cleanArtist(artist || '');
 
     const headers = { 'User-Agent': 'MoniStream-NextJS/0.1.0' };
 
-    // 2. Try exact match first
+    // 2. Try exact match first on LRCLIB
     let fetchUrl = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track)}`;
     if (cleanArt) {
       fetchUrl += `&artist_name=${encodeURIComponent(cleanArt)}`;
@@ -116,35 +111,66 @@ export async function GET(req: NextRequest) {
     // 3. Fallback to search if not found or bad request
     if (!foundData && (res.status === 404 || res.status === 400)) {
       const query = cleanArt ? `${track} ${cleanArt}` : track;
+      console.log('LRCLIB SEARCH QUERY:', query);
       const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(query)}`;
       const searchRes = await fetch(searchUrl, { headers, next: { revalidate: 86400 } });
       
       if (searchRes.ok) {
         const searchData = await searchRes.json();
+        console.log('SEARCH RESULTS LENGTH:', searchData.length);
         if (Array.isArray(searchData) && searchData.length > 0) {
-          // Return the first best match
-          foundData = searchData[0];
+          // Prioritize synced lyrics over plain lyrics
+          foundData = searchData.find((item: any) => item.syncedLyrics) || searchData[0];
+          console.log('FOUND DATA FROM SEARCH SYNCED:', !!foundData?.syncedLyrics);
         }
       }
       
       // 4. Last fallback: search without artist if artist search failed
       if (!foundData && cleanArt) {
+        console.log('LRCLIB FALLBACK QUERY:', track);
         const fallbackUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(track)}`;
         const fallbackRes = await fetch(fallbackUrl, { headers, next: { revalidate: 86400 } });
         if (fallbackRes.ok) {
           const fallbackData = await fallbackRes.json();
+          console.log('FALLBACK RESULTS LENGTH:', fallbackData.length);
           if (Array.isArray(fallbackData) && fallbackData.length > 0) {
-            foundData = fallbackData[0];
+            foundData = fallbackData.find((item: any) => item.syncedLyrics) || fallbackData[0];
+            console.log('FOUND DATA FROM FALLBACK SYNCED:', !!foundData?.syncedLyrics);
           }
         }
       }
     }
 
-    if (foundData) {
-      // Return lyrics in their original language — no transliteration
+    // If LRCLIB gave us synced lyrics, we use it immediately
+    if (foundData && foundData.syncedLyrics) {
       return NextResponse.json({
         plainLyrics: foundData.plainLyrics || null,
-        syncedLyrics: foundData.syncedLyrics || null,
+        syncedLyrics: foundData.syncedLyrics,
+        source: 'lrclib',
+      }, {
+        headers: { 'Cache-Control': 's-maxage=86400, stale-while-revalidate=172800' },
+      });
+    }
+
+    // 5. Try JioSaavn as a fallback if we have a saavnId and no synced lyrics from LRCLIB
+    if (saavnId && (source === 'jiosaavn' || saavnId)) {
+      const saavnLyrics = await fetchSaavnLyrics(saavnId);
+      if (saavnLyrics) {
+        return NextResponse.json({
+          plainLyrics: saavnLyrics,
+          syncedLyrics: null,
+          source: 'jiosaavn',
+        }, {
+          headers: { 'Cache-Control': 's-maxage=86400, stale-while-revalidate=172800' },
+        });
+      }
+    }
+
+    // 6. If JioSaavn failed but we had plain lyrics from LRCLIB, use those
+    if (foundData && foundData.plainLyrics) {
+      return NextResponse.json({
+        plainLyrics: foundData.plainLyrics,
+        syncedLyrics: null,
         source: 'lrclib',
       }, {
         headers: { 'Cache-Control': 's-maxage=86400, stale-while-revalidate=172800' },

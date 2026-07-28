@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { usePlayerStore } from '@/store/playerStore';
 import { PlayerControls } from './PlayerControls';
 import { ProgressBar } from './ProgressBar';
@@ -13,8 +13,36 @@ import Image from 'next/image';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
+interface SyncedLyric {
+  time: number;
+  text: string;
+}
+
+function parseSyncedLyrics(lyrics: string): SyncedLyric[] {
+  const lines = lyrics.split('\n');
+  const parsed: SyncedLyric[] = [];
+  const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
+
+  for (const line of lines) {
+    const match = line.match(timeRegex);
+    if (match) {
+      const minutes = parseInt(match[1], 10);
+      const seconds = parseInt(match[2], 10);
+      const milliseconds = parseInt(match[3], 10);
+
+      const timeInSeconds = minutes * 60 + seconds + (milliseconds / (match[3].length === 3 ? 1000 : 100));
+      const text = line.replace(timeRegex, '').trim();
+
+      if (text) {
+        parsed.push({ time: timeInSeconds, text });
+      }
+    }
+  }
+  return parsed;
+}
+
 export function FullscreenPlayer() {
-  const { currentTrack, isFullscreen, toggleFullscreen } = usePlayerStore();
+  const { currentTrack, isFullscreen, toggleFullscreen, currentTime } = usePlayerStore();
   const [viewMode, setViewMode] = useState<'cover' | 'lyrics'>('cover');
 
   useEffect(() => {
@@ -22,7 +50,6 @@ export function FullscreenPlayer() {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = '';
-      // Reset view mode when exiting fullscreen
       setTimeout(() => setViewMode('cover'), 300);
     }
     return () => {
@@ -36,6 +63,67 @@ export function FullscreenPlayer() {
 
   const { data: lyricsData, isLoading: lyricsLoading } = useSWR(lyricsUrl, fetcher);
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const activeLineRef = useRef<HTMLDivElement>(null);
+
+  const syncedLyrics = useMemo(() => {
+    if (lyricsData?.syncedLyrics) {
+      return parseSyncedLyrics(lyricsData.syncedLyrics);
+    }
+    return null;
+  }, [lyricsData?.syncedLyrics]);
+
+  const activeLineIndex = useMemo(() => {
+    if (!syncedLyrics) return -1;
+    for (let i = syncedLyrics.length - 1; i >= 0; i--) {
+      if (currentTime >= syncedLyrics[i].time) {
+        return i;
+      }
+    }
+    return -1;
+  }, [currentTime, syncedLyrics]);
+
+  useEffect(() => {
+    if (activeLineRef.current && scrollContainerRef.current) {
+      const container = scrollContainerRef.current;
+      const activeLine = activeLineRef.current;
+
+      // Calculate absolute target position
+      let offsetTop = 0;
+      let el: HTMLElement | null = activeLine;
+      while (el && el !== container) {
+        offsetTop += el.offsetTop;
+        el = el.offsetParent as HTMLElement;
+      }
+
+      // Target scroll position is 32px above the element's layout position to pin it to the top
+      // (120px was too large for a small square container and pushed it to the middle/bottom)
+      const targetScroll = Math.max(0, offsetTop - 10);
+      const startScroll = container.scrollTop;
+      const change = targetScroll - startScroll;
+      const duration = 400; // ms
+      const startTime = performance.now();
+
+      const animateScroll = (currentTime: number) => {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        // EaseInOutCubic
+        const ease = progress < 0.5
+          ? 4 * progress * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+        container.scrollTop = startScroll + change * ease;
+
+        if (progress < 1) {
+          requestAnimationFrame(animateScroll);
+        }
+      };
+
+      requestAnimationFrame(animateScroll);
+    }
+  }, [activeLineIndex]);
+
   if (!currentTrack || !isFullscreen) return null;
 
   const highThumb = typeof currentTrack.thumbnails?.high === 'string' ? currentTrack.thumbnails.high : (currentTrack.thumbnails?.high as any)?.url;
@@ -43,7 +131,7 @@ export function FullscreenPlayer() {
   const thumbnail = highThumb || defaultThumb || '';
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ y: "100%" }}
       animate={{ y: 0 }}
       exit={{ y: "100%" }}
@@ -59,9 +147,8 @@ export function FullscreenPlayer() {
       }}
       className="fixed inset-0 z-[100] bg-[#121212] flex flex-col font-sans"
     >
-      {/* Dynamic Background Blur - More premium scale and opacity */}
       <div className="absolute inset-0 z-0">
-        <div 
+        <div
           className="absolute inset-0 opacity-40 blur-[100px] scale-125 pointer-events-none transition-all duration-1000"
           style={{
             backgroundImage: thumbnail ? `url(${thumbnail})` : 'none',
@@ -69,15 +156,13 @@ export function FullscreenPlayer() {
             backgroundPosition: 'center',
           }}
         />
-        {/* Subtle gradient overlay to ensure text is always readable */}
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/80 pointer-events-none" />
       </div>
-      
-      {/* Top Bar */}
+
       <div className="relative z-10 flex items-center justify-between p-6">
-        <Button 
-          variant="ghost" 
-          size="icon" 
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={toggleFullscreen}
           className="hover:bg-white/10 rounded-full h-12 w-12 text-white transition-colors"
         >
@@ -91,13 +176,11 @@ export function FullscreenPlayer() {
             {currentTrack.artist || currentTrack.channelTitle}
           </span>
         </div>
-        <div className="w-12" /> {/* Spacer */}
+        <div className="w-12" />
       </div>
 
-      {/* Main Content */}
       <div className="relative z-10 flex-1 flex flex-col p-6 max-w-md mx-auto w-full gap-8">
-        
-        {/* 3D Flip Card (Cover / Lyrics) */}
+
         <div className="w-full flex-1 flex items-center justify-center min-h-0 relative [perspective:1200px]">
           <motion.div
             drag="x"
@@ -117,15 +200,14 @@ export function FullscreenPlayer() {
             style={{ transformStyle: 'preserve-3d' }}
             className="w-full aspect-square relative cursor-grab active:cursor-grabbing"
           >
-            {/* Front Face: Cover */}
-            <div 
+            <div
               className="absolute inset-0 w-full h-full rounded-[32px] overflow-hidden shadow-[0_30px_60px_rgba(0,0,0,0.6)]"
               style={{ backfaceVisibility: 'hidden' }}
             >
               {thumbnail ? (
-                <Image 
-                  src={thumbnail} 
-                  alt={currentTrack.title} 
+                <Image
+                  src={thumbnail}
+                  alt={currentTrack.title}
                   fill
                   sizes="(max-width: 768px) 100vw, 50vw"
                   className="object-cover"
@@ -145,8 +227,7 @@ export function FullscreenPlayer() {
               </div>
             </div>
 
-            {/* Back Face: Lyrics */}
-            <div 
+            <div
               className="absolute inset-0 w-full h-full rounded-[32px] overflow-hidden shadow-[0_30px_60px_rgba(0,0,0,0.6)] bg-white/5 backdrop-blur-3xl flex flex-col p-6 border border-white/10"
               style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
             >
@@ -154,20 +235,40 @@ export function FullscreenPlayer() {
                 <h3 className="text-xl font-bold text-white tracking-tight">Lyrics</h3>
                 <span className="text-xs font-bold uppercase tracking-wider text-white/50">Swipe Back</span>
               </div>
-              <div 
-                className="flex-1 overflow-y-auto hide-scrollbar scroll-smooth"
-                onPointerDown={(e) => {
-                  // Stop drag propagation when scrolling vertically
-                  e.stopPropagation();
-                }}
+              <div
+                ref={scrollContainerRef}
+                className="flex-1 overflow-y-auto hide-scrollbar relative"
+                onPointerDown={(e) => e.stopPropagation()}
               >
                 {lyricsLoading ? (
                   <div className="h-full flex flex-col items-center justify-center space-y-4">
-                    <div className="h-8 w-8 border-4 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
+                    <div className="h-8 w-8 border-4 border-white/20 border-t-white rounded-full animate-spin"></div>
                   </div>
-                ) : lyricsData && (lyricsData.plainLyrics || lyricsData.syncedLyrics) ? (
+                ) : syncedLyrics && syncedLyrics.length > 0 ? (
+                  <div className="space-y-4 pb-[100vh] pt-16">
+                    {syncedLyrics.map((lyric, index) => {
+                      const isActive = index === activeLineIndex;
+                      const isPassed = index < activeLineIndex;
+
+                      return (
+                        <div
+                          key={index}
+                          ref={isActive ? activeLineRef : null}
+                          className={`text-xl md:text-2xl font-bold leading-[1.6] transition-all duration-300 text-center ${isActive
+                            ? 'text-white scale-105 origin-center'
+                            : isPassed
+                              ? 'text-white/30'
+                              : 'text-white/60'
+                            }`}
+                        >
+                          {lyric.text}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : lyricsData && lyricsData.plainLyrics ? (
                   <div className="whitespace-pre-wrap text-xl md:text-2xl font-bold leading-[1.6] text-white/90 pb-8 text-center pt-2">
-                    {lyricsData.plainLyrics || "Synced lyrics coming soon..."}
+                    {lyricsData.plainLyrics}
                   </div>
                 ) : (
                   <div className="h-full flex items-center justify-center text-white/50 font-medium text-center">
@@ -179,9 +280,7 @@ export function FullscreenPlayer() {
           </motion.div>
         </div>
 
-        {/* Info & Controls Wrapper (Bottom Area) */}
         <div className="w-full flex flex-col gap-6 mt-auto">
-          {/* Track Info */}
           <div className="w-full flex items-center justify-between">
             <div className="flex flex-col overflow-hidden pr-4">
               <h1 className="text-2xl md:text-3xl font-bold text-white truncate tracking-tight">
@@ -194,16 +293,13 @@ export function FullscreenPlayer() {
             <LikeButton videoId={currentTrack.videoId} className="h-12 w-12 text-white shrink-0 hover:bg-white/10 rounded-full transition-colors" />
           </div>
 
-          {/* Progress & Player Controls */}
           <div className="w-full flex flex-col gap-5">
             <ProgressBar />
-            
             <div className="w-full pt-2 pb-6">
               <PlayerControls />
             </div>
           </div>
         </div>
-
       </div>
     </motion.div>
   );
