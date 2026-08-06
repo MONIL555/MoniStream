@@ -18,13 +18,21 @@ const NAV_ITEMS = [
   { icon: Heart, label: 'Liked Songs', href: '/collection/tracks' },
 ];
 
-const fetcher = (url: string) => fetch(url).then(res => res.json());
+const fetcher = async (url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) return []; // Return empty array on auth failure — avoids 401 noise
+  return res.json();
+};
 
 export function Sidebar() {
   const pathname = usePathname();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const { data: playlists } = useSWR('/api/playlists', fetcher);
   const { user } = useAuth();
+  const isAuthenticated = !!user;
+  const { data: playlists } = useSWR(
+    isAuthenticated ? '/api/playlists' : null,
+    fetcher
+  );
 
   return (
     <aside className="hidden md:flex flex-col w-[200px] h-[calc(100vh-2rem)] my-4 ml-4 z-20 shrink-0">

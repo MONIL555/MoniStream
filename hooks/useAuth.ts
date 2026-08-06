@@ -17,11 +17,19 @@ const fetcher = async (url: string) => {
     // Try to refresh the token
     const refreshRes = await fetch('/api/auth/refresh', { method: 'POST' });
     if (refreshRes.ok) {
-      // Retry the original request
+      // Retry the original request with new token
       const retryRes = await fetch(url);
       if (retryRes.ok) return retryRes.json();
     }
-    throw new Error('Unauthorized');
+    // Refresh failed — clear persisted auth state and redirect to login
+    // The refresh endpoint already clears cookies on failure
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('monistream-auth-storage');
+      } catch { /* ignore */ }
+      window.location.href = '/login';
+    }
+    throw new Error('Session expired');
   }
 
   if (!res.ok) throw new Error('Failed to fetch');

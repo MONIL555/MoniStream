@@ -12,7 +12,12 @@ export async function GET(req: NextRequest) {
     const token = req.cookies.get('access_token')?.value || req.headers.get('Authorization')?.replace('Bearer ', '');
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     
-    const jwtUser = verifyAccessToken(token);
+    let jwtUser;
+    try {
+      jwtUser = verifyAccessToken(token);
+    } catch {
+      return NextResponse.json({ error: 'Token expired or invalid' }, { status: 401 });
+    }
 
     await connectDB();
     
@@ -40,7 +45,12 @@ export async function POST(req: NextRequest) {
     const token = req.cookies.get('access_token')?.value || req.headers.get('Authorization')?.replace('Bearer ', '');
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     
-    const jwtUser = verifyAccessToken(token);
+    let jwtUser;
+    try {
+      jwtUser = verifyAccessToken(token);
+    } catch {
+      return NextResponse.json({ error: 'Token expired or invalid' }, { status: 401 });
+    }
 
     const body = await req.json();
     const { name } = body;
