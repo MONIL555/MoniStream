@@ -21,13 +21,13 @@ const fetcher = async (url: string) => {
       const retryRes = await fetch(url);
       if (retryRes.ok) return retryRes.json();
     }
-    // Refresh failed — clear persisted auth state and redirect to login
+    // Refresh failed — clear persisted auth state
     // The refresh endpoint already clears cookies on failure
+    // Do NOT redirect here — the middleware handles route protection
     if (typeof window !== 'undefined') {
       try {
         localStorage.removeItem('monistream-auth-storage');
       } catch { /* ignore */ }
-      window.location.href = '/login';
     }
     throw new Error('Session expired');
   }
