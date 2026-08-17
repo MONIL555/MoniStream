@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, usePathname } from 'next/navigation';
-import { ChevronLeft, ChevronRight, User, Settings, LogOut, Search, HelpCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, User, Settings, LogOut, Search, HelpCircle, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
 import { Avatar } from '@/components/ui/avatar';
@@ -62,6 +62,36 @@ export function TopBar() {
   const router = useRouter();
   const pathname = usePathname();
   const { user, isAuthenticated, logout } = useAuth();
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const checkStandalone = () => {
+      return (
+        window.matchMedia('(display-mode: standalone)').matches ||
+        (window.navigator as any).standalone === true ||
+        document.referrer.includes('android-app://')
+      );
+    };
+    
+    setIsStandalone(checkStandalone());
+    
+    const mediaQuery = window.matchMedia('(display-mode: standalone)');
+    const handleChange = (e: MediaQueryListEvent) => setIsStandalone(e.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    
+    return () => {
+      mediaQuery.removeEventListener('change', handleChange);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
 
   return (
     <header className="sticky top-2 md:top-4 z-40 flex h-16 items-center justify-between px-4 md:px-6 pt-2 pb-2 transition-all duration-300 mx-2 md:mx-4 rounded-2xl bg-background/80 backdrop-blur-xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
@@ -129,6 +159,22 @@ export function TopBar() {
                 <HelpCircle className="mr-3 h-4 w-4" />
                 <span className="font-semibold">Help & Features</span>
               </DropdownMenuItem>
+              {!isStandalone && (
+                <DropdownMenuItem onClick={async () => {
+                  if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    const { outcome } = await deferredPrompt.userChoice;
+                    if (outcome === 'accepted') {
+                      setDeferredPrompt(null);
+                    }
+                  } else {
+                    alert("To install the app, tap your browser's menu and select 'Add to Home Screen' or 'Install App'. On iOS Safari, tap the Share button and select 'Add to Home Screen'.");
+                  }
+                }}>
+                  <Download className="mr-3 h-4 w-4" />
+                  <span className="font-semibold">Install as App</span>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={logout} className="text-destructive hover:text-destructive">
                 <LogOut className="mr-3 h-4 w-4" />
