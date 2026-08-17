@@ -1,9 +1,8 @@
 'use client';
-import React, { useState, useRef, memo } from 'react';
+import React, { useState, useRef, memo, useCallback } from 'react';
 
 import { Play, Pause, MoreHorizontal, ListPlus, User, Trash2 } from 'lucide-react';
 import { usePlayerStore } from '@/store/playerStore';
-import { motion, useAnimation } from 'framer-motion';
 import { useQueueStore } from '@/store/queueStore';
 import { LikeButton } from './LikeButton';
 import { Button } from '@/components/ui/button';
@@ -180,24 +179,48 @@ export const TrackRow = memo(function TrackRow({ track, index, showCover = true,
         </div>
       )}
 
-      <motion.div 
-        drag={!isPendingAdmin ? "x" : false}
-        dragConstraints={{ left: 0, right: 0 }}
-        dragElastic={{ left: 0, right: 0.5 }}
-        onDragStart={() => !isPendingAdmin && setIsDragging(true)}
-        onDragEnd={(e, info) => {
-          setTimeout(() => setIsDragging(false), 100); // delay so onClick can check it
-          if (info.offset.x > 80) {
-            const trackData = {
-              videoId: track.videoId, title, artist,
-              channelId: track.channelId || '',
-              thumbnails: { default: thumbnail },
-              duration: track.duration || 0, durationText,
-              tags: [], playCount: 0, likeCount: 0, cachedAt: new Date().toISOString()
-            };
-            addToQueue(trackData);
-            toast.success('Added to queue');
-          }
+      {/* Lightweight native touch swipe — replaces Framer Motion drag for performance */}
+      <div 
+        ref={(el) => {
+          if (!el || isPendingAdmin) return;
+          let startX = 0;
+          let currentX = 0;
+          let swiping = false;
+          
+          const onTouchStart = (e: TouchEvent) => {
+            startX = e.touches[0].clientX;
+            currentX = 0;
+            swiping = true;
+            el.style.transition = 'none';
+          };
+          const onTouchMove = (e: TouchEvent) => {
+            if (!swiping) return;
+            currentX = Math.max(0, e.touches[0].clientX - startX);
+            el.style.transform = `translateX(${Math.min(currentX, 100)}px)`;
+            if (currentX > 10) setIsDragging(true);
+          };
+          const onTouchEnd = () => {
+            if (!swiping) return;
+            swiping = false;
+            el.style.transition = 'transform 0.2s ease-out';
+            el.style.transform = 'translateX(0px)';
+            if (currentX > 80) {
+              const trackData = {
+                videoId: track.videoId, title, artist,
+                channelId: track.channelId || '',
+                thumbnails: { default: thumbnail },
+                duration: track.duration || 0, durationText,
+                tags: [], playCount: 0, likeCount: 0, cachedAt: new Date().toISOString()
+              };
+              addToQueue(trackData);
+              toast.success('Added to queue');
+            }
+            setTimeout(() => setIsDragging(false), 100);
+          };
+          
+          el.addEventListener('touchstart', onTouchStart, { passive: true });
+          el.addEventListener('touchmove', onTouchMove, { passive: true });
+          el.addEventListener('touchend', onTouchEnd, { passive: true });
         }}
         className={cn(
           "relative bg-background group flex items-center gap-2 md:gap-3 px-2 md:px-3 py-1.5 md:py-2 rounded-xl transition-colors duration-200",
@@ -208,6 +231,7 @@ export const TrackRow = memo(function TrackRow({ track, index, showCover = true,
               ? "opacity-60"
               : "hover:bg-surface-hover cursor-pointer"
         )}
+        style={{ contain: 'layout style paint', willChange: 'transform' }}
         onClick={handlePlay}
       >
       {/* Thumbnail with play overlay */}
@@ -312,7 +336,7 @@ export const TrackRow = memo(function TrackRow({ track, index, showCover = true,
           </div>
         </DropdownMenu>
       </div>
-      </motion.div>
+      </div>
     </div>
   );
 });

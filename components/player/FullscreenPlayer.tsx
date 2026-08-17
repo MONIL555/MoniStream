@@ -10,6 +10,7 @@ import { LikeButton } from '@/components/music/LikeButton';
 import { motion, AnimatePresence } from 'framer-motion';
 import useSWR from 'swr';
 import Image from 'next/image';
+import { useCurrentTime } from '@/hooks/useCurrentTime';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
@@ -42,7 +43,8 @@ function parseSyncedLyrics(lyrics: string): SyncedLyric[] {
 }
 
 export function FullscreenPlayer() {
-  const { currentTrack, isFullscreen, toggleFullscreen, currentTime } = usePlayerStore();
+  const { currentTrack, isFullscreen, toggleFullscreen } = usePlayerStore();
+  const currentTime = useCurrentTime(10); // 10fps for smooth lyrics scrolling
   const [viewMode, setViewMode] = useState<'cover' | 'lyrics'>('cover');
 
   useEffect(() => {
@@ -181,24 +183,31 @@ export function FullscreenPlayer() {
 
       <div className="relative z-10 flex-1 flex flex-col p-6 max-w-md mx-auto w-full gap-8">
 
-        <div className="w-full flex-1 flex items-center justify-center min-h-0 relative [perspective:1200px]">
-          <motion.div
-            drag="x"
-            dragDirectionLock
-            dragConstraints={{ left: 0, right: 0 }}
-            dragElastic={0.2}
-            onDragEnd={(e, info) => {
-              if (info.offset.x < -60 && viewMode === 'cover') {
+        <div className="w-full flex-1 flex items-center justify-center min-h-0 relative" style={{ perspective: '1200px' }}>
+          {/* CSS-based 3D flip — much lighter than Framer Motion spring for mobile GPUs */}
+          <div
+            onTouchStart={(e) => {
+              const touch = e.touches[0];
+              (e.currentTarget as any)._touchStartX = touch.clientX;
+            }}
+            onTouchEnd={(e) => {
+              const startX = (e.currentTarget as any)._touchStartX;
+              if (startX === undefined) return;
+              const endX = e.changedTouches[0].clientX;
+              const diff = endX - startX;
+              if (diff < -60 && viewMode === 'cover') {
                 setViewMode('lyrics');
-              } else if (info.offset.x > 60 && viewMode === 'lyrics') {
+              } else if (diff > 60 && viewMode === 'lyrics') {
                 setViewMode('cover');
               }
             }}
-            initial={false}
-            animate={{ rotateY: viewMode === 'lyrics' ? 180 : 0 }}
-            transition={{ type: "spring", stiffness: 200, damping: 25 }}
-            style={{ transformStyle: 'preserve-3d' }}
             className="w-full aspect-square relative cursor-grab active:cursor-grabbing"
+            style={{
+              transformStyle: 'preserve-3d',
+              transform: viewMode === 'lyrics' ? 'rotateY(180deg)' : 'rotateY(0deg)',
+              transition: 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)',
+              willChange: 'transform',
+            }}
           >
             <div
               className="absolute inset-0 w-full h-full rounded-[32px] overflow-hidden shadow-[0_30px_60px_rgba(0,0,0,0.6)]"
@@ -277,7 +286,7 @@ export function FullscreenPlayer() {
                 )}
               </div>
             </div>
-          </motion.div>
+          </div>
         </div>
 
         <div className="w-full flex flex-col gap-6 mt-auto">

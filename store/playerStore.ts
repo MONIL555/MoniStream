@@ -10,6 +10,8 @@ import { useQueueStore } from './queueStore';
 import { useAuthStore } from './authStore';
 import { useConfigStore } from './configStore';
 import { toast } from 'sonner';
+import { resetGlobalCurrentTime } from '@/hooks/useCurrentTime';
+import { consumePrefetchedStreamUrl } from '@/hooks/usePrefetch';
 
 interface PlayerState {
   // State
@@ -17,7 +19,7 @@ interface PlayerState {
   isPlaying: boolean;
   volume: number;
   isMuted: boolean;
-  currentTime: number;
+  // currentTime is now managed via ref-based system in hooks/useCurrentTime.ts
   duration: number;
   isLyricsOpen: boolean;
   isQueueOpen: boolean;
@@ -33,7 +35,6 @@ interface PlayerState {
   togglePlay: () => void;
   setVolume: (volume: number) => void;
   toggleMute: () => void;
-  setCurrentTime: (time: number) => void;
   setDuration: (duration: number) => void;
   toggleLyrics: () => void;
   toggleQueue: () => void;
@@ -52,7 +53,6 @@ const initialState = {
   isPlaying: false,
   volume: 100,
   isMuted: false,
-  currentTime: 0,
   duration: 0,
   isLyricsOpen: false,
   isQueueOpen: false,
@@ -70,7 +70,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   setCurrentTrack: (track) => {
     if (!track) {
-      set({ currentTrack: null, currentTime: 0, duration: 0, isPlaying: false, activePlayer: 'youtube' });
+      resetGlobalCurrentTime();
+      set({ currentTrack: null, duration: 0, isPlaying: false, activePlayer: 'youtube' });
       return;
     }
 
@@ -94,7 +95,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       }
     }
 
-    set({ currentTrack: track, currentTime: 0, duration: 0, isPlaying: !!track, activePlayer });
+    resetGlobalCurrentTime();
+    set({ currentTrack: track, duration: 0, isPlaying: !!track, activePlayer });
   },
 
   swapToCachedTrack: (track) => {
@@ -112,7 +114,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   toggleMute: () =>
     set((state) => ({ isMuted: !state.isMuted })),
 
-  setCurrentTime: (time) => set({ currentTime: time }),
+  // currentTime is now managed via ref-based system — see hooks/useCurrentTime.ts
 
   setDuration: (duration) => set({ duration }),
 
@@ -250,6 +252,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     if (next) {
+      // Inject prefetched stream URL if available (instant transition)
+      const prefetchedUrl = consumePrefetchedStreamUrl(next.videoId);
+      if (prefetchedUrl && !next.streamUrl && !next.audioUrl) {
+        next = { ...next, streamUrl: prefetchedUrl };
+      }
       setCurrentTrack(next);
       setIsPlaying(true);
 

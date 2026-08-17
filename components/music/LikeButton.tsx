@@ -13,10 +13,11 @@ interface LikeButtonProps {
 }
 
 export function LikeButton({ videoId, className }: LikeButtonProps) {
-  const { user, isAuthenticated, toggleLikedTrackId } = useAuthStore();
+  // Fine-grained selector: only re-renders when THIS track's liked state changes
+  const isLiked = useAuthStore(s => s.user?.likedTrackIds?.includes(videoId) ?? false);
+  const isAuthenticated = useAuthStore(s => s.isAuthenticated);
+  const toggleLikedTrackId = useAuthStore(s => s.toggleLikedTrackId);
   const [isLoading, setIsLoading] = useState(false);
-
-  const isLiked = user?.likedTrackIds?.includes(videoId) || false;
 
   const toggleLike = async (e: React.MouseEvent) => {
     e.preventDefault();

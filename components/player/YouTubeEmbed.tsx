@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { usePlayerStore } from '@/store/playerStore';
 import { useQueueStore } from '@/store/queueStore';
 import { useHistoryStore } from '@/store/historyStore';
+import { setGlobalCurrentTime, getGlobalCurrentTime } from '@/hooks/useCurrentTime';
 
 declare global {
   interface Window {
@@ -32,7 +33,6 @@ export function YouTubeEmbed() {
     activePlayer, // New
     setPlayerReady,
     setIsPlaying,
-    setCurrentTime,
     setDuration,
     setCurrentTrack,
     advanceToNext,
@@ -158,15 +158,14 @@ export function YouTubeEmbed() {
   useEffect(() => {
     if (!currentTrack || !playerRef.current || !isActive) return;
 
+    // Stop old video IMMEDIATELY to prevent overlap during transition
+    if (typeof playerRef.current.stopVideo === 'function') {
+      playerRef.current.stopVideo();
+    }
+
     // Only load by ID when YouTube is the active player
     if (typeof playerRef.current.loadVideoById === 'function') {
       playerRef.current.loadVideoById(currentTrack.videoId);
-      
-      // Inform user about limited lockscreen
-      toast('ℹ️ Playing via YouTube — lockscreen controls limited.', { 
-        description: 'Listen for 30s to unlock full background playback!',
-        duration: 5000 
-      });
       // Wait for it to play, the onStateChange will handle the isPlaying state update
     }
   }, [currentTrack, isApiReady, isActive]);
@@ -187,7 +186,7 @@ export function YouTubeEmbed() {
           if (data.status === 'ready' && data.track && data.track.audioUrl) {
             // Swap to the cached track seamlessly
             const store = usePlayerStore.getState();
-            const t = store.currentTime;
+            const t = getGlobalCurrentTime();
             store.swapToCachedTrack({
               ...currentTrack,
               source: data.track.source || 'pagalworld_cached',
@@ -273,7 +272,7 @@ export function YouTubeEmbed() {
           const t = playerRef.current.getCurrentTime();
           const duration = playerRef.current.getDuration();
           if (isFinite(t) && t > 0) {
-            setCurrentTime(t);
+            setGlobalCurrentTime(t);
 
             // Sync media session position state
             if ('mediaSession' in navigator && isFinite(duration) && duration > 0) {
@@ -383,7 +382,7 @@ export function YouTubeEmbed() {
                   if (result!.audioUrl) {
                     toast.success(`✅ "${currentTrack.title}" is now available with full lockscreen support!`);
                     const store = usePlayerStore.getState();
-                    const currentT = store.currentTime;
+                    const currentT = getGlobalCurrentTime();
                     store.swapToCachedTrack({
                       ...currentTrack,
                       source: 'pagalworld_cached',
@@ -411,7 +410,7 @@ export function YouTubeEmbed() {
                       if (statusData.status === 'ready' && statusData.track?.audioUrl) {
                         toast.success(`✅ "${currentTrack.title}" is now available with full lockscreen support!`);
                         const store = usePlayerStore.getState();
-                        const currentT = store.currentTime;
+                        const currentT = getGlobalCurrentTime();
                         store.swapToCachedTrack({
                           ...currentTrack,
                           source: statusData.track.source || 'pagalworld_cached',
@@ -445,7 +444,7 @@ export function YouTubeEmbed() {
     }, 1000);
 
     return () => clearInterval(id);
-  }, [isPlaying, isActive, setCurrentTime, currentTrack]);
+  }, [isPlaying, isActive, currentTrack]);
   // ══════════════════════════════════════════════════════════════
   // 7. Global Expose for Seek and Sync Play (TrackRow.tsx)
   // ══════════════════════════════════════════════════════════════

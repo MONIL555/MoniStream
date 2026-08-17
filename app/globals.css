@@ -269,6 +269,19 @@
   contain-intrinsic-size: auto 300px;
 }
 
+/* ─── GPU Scroll Performance ───────────────────────────────── */
+/* Promote main scroll containers to their own compositing layer */
+.gpu-scroll {
+  -webkit-overflow-scrolling: touch; /* iOS momentum scrolling */
+  will-change: scroll-position;
+  transform: translateZ(0); /* Force GPU compositing layer */
+}
+
+/* Isolate list items from causing parent repaints */
+.contain-paint {
+  contain: layout style paint;
+}
+
 /* ─── Accessibility ────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {

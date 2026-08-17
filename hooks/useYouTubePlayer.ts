@@ -1,6 +1,7 @@
 'use client';
 
 import { usePlayerStore } from '@/store/playerStore';
+import { getGlobalCurrentTime } from '@/hooks/useCurrentTime';
 
 export function useYouTubePlayer() {
   const {
@@ -8,7 +9,6 @@ export function useYouTubePlayer() {
     isPlaying,
     volume,
     isMuted,
-    currentTime,
     duration,
     isLyricsOpen,
     isQueueOpen,
@@ -35,7 +35,7 @@ export function useYouTubePlayer() {
     isPlaying,
     volume,
     isMuted,
-    currentTime,
+    currentTime: getGlobalCurrentTime(),
     duration,
     isLyricsOpen,
     isQueueOpen,

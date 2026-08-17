@@ -3,24 +3,18 @@
 import { usePlayerStore } from '@/store/playerStore';
 import { Slider } from '@/components/ui/slider';
 import { formatDuration } from '@/lib/utils';
-import { useEffect, useState, useRef } from 'react';
-
-import { useShallow } from 'zustand/react/shallow';
+import { useState, useRef } from 'react';
+import { useCurrentTime } from '@/hooks/useCurrentTime';
 
 export function ProgressBar() {
-  const { currentTime, duration } = usePlayerStore(
-    useShallow(s => ({ currentTime: s.currentTime, duration: s.duration }))
-  );
-  const [localTime, setLocalTime] = useState(currentTime);
+  const duration = usePlayerStore(s => s.duration);
+  const currentTime = useCurrentTime(4); // 4fps polling — smooth enough for a progress bar
+  const [localTime, setLocalTime] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const dragTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Sync local time with store time unless we're actively dragging
-  useEffect(() => {
-    if (!isDragging) {
-      setLocalTime(currentTime);
-    }
-  }, [currentTime, isDragging]);
+  // Display time: use local (dragged) time if dragging, otherwise use polled time
+  const displayTime = isDragging ? localTime : currentTime;
 
   const handleChange = (val: number) => {
     if (dragTimeoutRef.current) clearTimeout(dragTimeoutRef.current);
@@ -44,10 +38,10 @@ export function ProgressBar() {
   return (
     <div className="flex items-center gap-3 w-full">
       <span className="text-xs font-semibold text-muted-foreground min-w-[40px] text-right">
-        {formatDuration(localTime)}
+        {formatDuration(displayTime)}
       </span>
       <Slider
-        value={localTime}
+        value={displayTime}
         max={duration || 100}
         step={1}
         onChange={handleChange}

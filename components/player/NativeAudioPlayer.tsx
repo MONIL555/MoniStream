@@ -5,6 +5,8 @@ import { usePlayerStore } from '@/store/playerStore';
 import { useQueueStore } from '@/store/queueStore';
 import { useConfigStore } from '@/store/configStore';
 import { useHistoryStore } from '@/store/historyStore';
+import { setGlobalCurrentTime } from '@/hooks/useCurrentTime';
+import { consumePrefetchedStreamUrl } from '@/hooks/usePrefetch';
 
 export function NativeAudioPlayer() {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -16,7 +18,6 @@ export function NativeAudioPlayer() {
     isMuted,
     activePlayer,
     setIsPlaying,
-    setCurrentTime,
     setDuration,
     setCurrentTrack,
     advanceToNext,
@@ -33,6 +34,13 @@ export function NativeAudioPlayer() {
     if (!isActive) {
       setStreamUrl(null);
       return;
+    }
+
+    // Stop old audio IMMEDIATELY to prevent overlap during transition
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.removeAttribute('src');
+      audioRef.current.load();
     }
 
     if (currentTrack.streamUrl) {
@@ -70,11 +78,16 @@ export function NativeAudioPlayer() {
     const trackIdToFetch = saavnIdToUse || currentTrack.videoId;
 
     if (trackIdToFetch) {
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
       // Clear the old stream URL immediately to prevent playing the old song while loading
       setStreamUrl(null);
+
+      // Check prefetch cache first for instant resolution
+      const prefetched = consumePrefetchedStreamUrl(currentTrack.videoId);
+      if (prefetched) {
+        setStreamUrl(prefetched);
+        return;
+      }
+
       // Fetch stream dynamically
       fetch(`/api/tracks/${trackIdToFetch}/stream`)
         .then(res => res.json())
@@ -211,7 +224,7 @@ export function NativeAudioPlayer() {
     if (audioRef.current && isActive) {
       const t = audioRef.current.currentTime;
       const duration = audioRef.current.duration;
-      setCurrentTime(t);
+      setGlobalCurrentTime(t);
 
       if ('mediaSession' in navigator && isFinite(duration) && duration > 0) {
         try {

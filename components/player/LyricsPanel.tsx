@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import useSWR from 'swr';
 import { useEffect, useRef, useMemo } from 'react';
+import { useCurrentTime } from '@/hooks/useCurrentTime';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
@@ -37,7 +38,8 @@ function parseSyncedLyrics(lyrics: string): SyncedLyric[] {
 }
 
 export function LyricsPanel() {
-  const { isLyricsOpen, toggleLyrics, currentTrack, currentTime } = usePlayerStore();
+  const { isLyricsOpen, toggleLyrics, currentTrack } = usePlayerStore();
+  const currentTime = useCurrentTime(10); // 10fps for smooth lyrics sync
 
   const lyricsUrl = isLyricsOpen && currentTrack
     ? `/api/lyrics?track=${encodeURIComponent(currentTrack.title)}&artist=${encodeURIComponent(currentTrack.artist || currentTrack.channelTitle || '')}${currentTrack.saavnId ? `&saavnId=${encodeURIComponent(currentTrack.saavnId)}` : ''}${currentTrack.source ? `&source=${currentTrack.source}` : ''}`
