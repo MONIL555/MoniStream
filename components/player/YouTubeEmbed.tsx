@@ -22,6 +22,7 @@ export function YouTubeEmbed() {
   const silentAudioRef = useRef<HTMLAudioElement>(null);
   const wakeLockRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const oscGainRef = useRef<{ osc: OscillatorNode; gain: GainNode } | null>(null);
   // In-memory dedup: skip /api/cache-track GET for videoIds we've already checked this session
   const cacheCheckedIds = useRef<Set<string>>(new Set());
 
@@ -499,12 +500,17 @@ export function YouTubeEmbed() {
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.start();
+        oscGainRef.current = { osc, gain };
       } catch { /* ignore */ }
     };
 
     const onInteract = () => {
       setup();
-      audioContextRef.current?.resume().catch(() => {});
+      // Only resume if actively playing — don't wake up AudioContext on idle taps
+      const store = usePlayerStore.getState();
+      if (store.isPlaying && store.activePlayer === 'youtube') {
+        audioContextRef.current?.resume().catch(() => {});
+      }
     };
 
     document.addEventListener('click', onInteract);
@@ -514,12 +520,14 @@ export function YouTubeEmbed() {
       document.removeEventListener('touchstart', onInteract);
       audioContextRef.current?.close().catch(() => {});
       audioContextRef.current = null;
+      oscGainRef.current = null;
     };
   }, []);
 
   useEffect(() => {
     if (isPlaying && isActive) {
       silentAudioRef.current?.play().catch(() => {});
+      // Resume AudioContext only when actually playing
       audioContextRef.current?.resume().catch(() => {});
 
       if ('wakeLock' in navigator && !wakeLockRef.current) {
@@ -534,9 +542,39 @@ export function YouTubeEmbed() {
       }
     } else {
       silentAudioRef.current?.pause();
+      // Suspend AudioContext when paused to stop the oscillator from burning CPU
+      audioContextRef.current?.suspend().catch(() => {});
+      // Release wake lock when paused
       wakeLockRef.current?.release().then(() => { wakeLockRef.current = null; }).catch(() => {});
     }
   }, [isPlaying, isActive]);
+
+  // Release wake lock when page is backgrounded (saves battery),
+  // re-acquire when page becomes visible again if still playing
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Page backgrounded — release wake lock (screen is off anyway)
+        wakeLockRef.current?.release().then(() => { wakeLockRef.current = null; }).catch(() => {});
+      } else {
+        // Page visible again — re-acquire wake lock if still playing
+        const store = usePlayerStore.getState();
+        if (store.isPlaying && store.activePlayer === 'youtube' && 'wakeLock' in navigator && !wakeLockRef.current) {
+          (navigator as any).wakeLock.request('screen')
+            .then((lock: any) => {
+              wakeLockRef.current = lock;
+              lock.addEventListener('release', () => {
+                wakeLockRef.current = null;
+              });
+            })
+            .catch(() => {});
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   // 9a. Set Metadata only when track changes
   useEffect(() => {

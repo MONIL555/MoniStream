@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { ListMusic, Mic2, Maximize2, Play, Pause, SkipForward } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LikeButton } from '@/components/music/LikeButton';
-import { motion } from 'framer-motion';
+import { useRef, useCallback } from 'react';
 
 import { useShallow } from 'zustand/react/shallow';
 
@@ -29,6 +29,26 @@ export function PlayerBar() {
     }))
   );
 
+  // Vanilla touch swipe-to-dismiss (replaces Framer Motion drag)
+  const touchStartRef = useRef<{ y: number; time: number } | null>(null);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartRef.current = { y: e.touches[0].clientY, time: Date.now() };
+  }, []);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const deltaY = e.changedTouches[0].clientY - touchStartRef.current.y;
+    const deltaTime = Date.now() - touchStartRef.current.time;
+    const velocity = deltaY / Math.max(deltaTime, 1);
+
+    // Swipe down to dismiss: >50px displacement OR fast velocity (>0.3px/ms)
+    if (deltaY > 50 || velocity > 0.3) {
+      setCurrentTrack(null);
+    }
+    touchStartRef.current = null;
+  }, [setCurrentTrack]);
+
   if (!currentTrack) return null;
 
   const thumbnail = typeof currentTrack.thumbnails?.default === 'string' 
@@ -47,18 +67,11 @@ export function PlayerBar() {
   return (
     <>
       {/* Mobile Mini Player — sits above MobileNav */}
-      <motion.div 
+      <div 
         className="md:hidden fixed bottom-[88px] left-2 right-2 z-50 cursor-pointer" 
         onClick={toggleFullscreen}
-        drag="y"
-        dragDirectionLock
-        dragConstraints={{ top: 0, bottom: 0 }}
-        dragElastic={{ top: 0, bottom: 0.8 }}
-        onDragEnd={(e, info) => {
-          if (info.offset.y > 50 || info.velocity.y > 300) {
-            setCurrentTrack(null);
-          }
-        }}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
       >
         <div className="flex items-center gap-3 h-14 px-3 bg-[#282828] hover:bg-[#3E3E3E] rounded-md overflow-hidden transition-colors shadow-lg">
           <Avatar 
@@ -96,7 +109,7 @@ export function PlayerBar() {
             <SkipForward className="h-5 w-5 fill-current" />
           </Button>
         </div>
-      </motion.div>
+      </div>
 
       {/* Desktop Full Player Bar */}
       <div className="hidden md:flex fixed bottom-0 left-0 right-0 z-50 h-24 bg-black border-t border-border px-4 items-center justify-between">

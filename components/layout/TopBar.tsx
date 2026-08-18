@@ -94,7 +94,7 @@ export function TopBar() {
   }, []);
 
   return (
-    <header className="sticky top-2 md:top-4 z-40 flex h-16 items-center justify-between px-4 md:px-6 pt-2 pb-2 transition-all duration-300 mx-2 md:mx-4 rounded-2xl bg-background/80 backdrop-blur-xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
+    <header className="sticky top-2 md:top-4 z-40 flex h-16 items-center justify-between px-4 md:px-6 pt-2 pb-2 transition-all duration-300 mx-2 md:mx-4 rounded-2xl bg-background/80 backdrop-blur-md border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
       {/* Navigation / Brand */}
       <div className={`flex items-center gap-2 pl-1 ${pathname.startsWith('/search') ? 'hidden md:flex md:flex-1' : 'flex-1'}`}>
         {!pathname.startsWith('/search') && (

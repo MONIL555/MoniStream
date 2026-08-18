@@ -10,7 +10,7 @@ import { useQueueStore } from './queueStore';
 import { useAuthStore } from './authStore';
 import { useConfigStore } from './configStore';
 import { toast } from 'sonner';
-import { resetGlobalCurrentTime } from '@/hooks/useCurrentTime';
+import { resetGlobalCurrentTime, setGlobalPlayingState } from '@/hooks/useCurrentTime';
 import { consumePrefetchedStreamUrl } from '@/hooks/usePrefetch';
 
 interface PlayerState {
@@ -71,6 +71,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setCurrentTrack: (track) => {
     if (!track) {
       resetGlobalCurrentTime();
+      setGlobalPlayingState(false);
       set({ currentTrack: null, duration: 0, isPlaying: false, activePlayer: 'youtube' });
       return;
     }
@@ -96,6 +97,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     resetGlobalCurrentTime();
+    setGlobalPlayingState(!!track);
     set({ currentTrack: track, duration: 0, isPlaying: !!track, activePlayer });
   },
 
@@ -105,9 +107,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     set({ currentTrack: track, activePlayer: 'native' });
   },
 
-  setIsPlaying: (playing) => set({ isPlaying: playing }),
+  setIsPlaying: (playing) => {
+    setGlobalPlayingState(playing);
+    set({ isPlaying: playing });
+  },
 
-  togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
+  togglePlay: () => set((state) => {
+    setGlobalPlayingState(!state.isPlaying);
+    return { isPlaying: !state.isPlaying };
+  }),
 
   setVolume: (volume) => set({ volume, isMuted: volume === 0 }),
 
@@ -137,7 +145,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   setPlayerReady: (ready) => set({ isPlayerReady: ready }),
 
-  reset: () => set(initialState),
+  reset: () => {
+    setGlobalPlayingState(false);
+    set(initialState);
+  },
 
   /**
    * Fetch a mix for the given track and populate the autoplay queue.

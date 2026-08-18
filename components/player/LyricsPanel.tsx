@@ -37,11 +37,15 @@ function parseSyncedLyrics(lyrics: string): SyncedLyric[] {
   return parsed;
 }
 
-export function LyricsPanel() {
-  const { isLyricsOpen, toggleLyrics, currentTrack } = usePlayerStore();
+/**
+ * Inner component that contains the useCurrentTime hook.
+ * This only mounts when the lyrics panel is actually visible,
+ * so the 10fps RAF loop doesn't run when lyrics are hidden.
+ */
+function LyricsPanelContent({ currentTrack, toggleLyrics }: { currentTrack: any; toggleLyrics: () => void }) {
   const currentTime = useCurrentTime(10); // 10fps for smooth lyrics sync
 
-  const lyricsUrl = isLyricsOpen && currentTrack
+  const lyricsUrl = currentTrack
     ? `/api/lyrics?track=${encodeURIComponent(currentTrack.title)}&artist=${encodeURIComponent(currentTrack.artist || currentTrack.channelTitle || '')}${currentTrack.saavnId ? `&saavnId=${encodeURIComponent(currentTrack.saavnId)}` : ''}${currentTrack.source ? `&source=${currentTrack.source}` : ''}`
     : null;
 
@@ -108,8 +112,6 @@ export function LyricsPanel() {
     }
   }, [activeLineIndex]);
 
-  if (!isLyricsOpen) return null;
-
   return (
     <div className="fixed top-0 right-0 h-[calc(100vh-100px)] w-full max-w-md z-40 p-4 md:p-6 animate-fade-in pointer-events-none">
       <div className="clay-panel h-full w-full flex flex-col overflow-hidden pointer-events-auto shadow-2xl bg-surface/95 backdrop-blur-xl border-l-0">
@@ -170,4 +172,14 @@ export function LyricsPanel() {
       </div>
     </div>
   );
+}
+
+export function LyricsPanel() {
+  const { isLyricsOpen, toggleLyrics, currentTrack } = usePlayerStore();
+
+  // Don't render anything when closed — this ensures the useCurrentTime(10)
+  // RAF loop inside LyricsPanelContent is completely stopped when lyrics are hidden.
+  if (!isLyricsOpen) return null;
+
+  return <LyricsPanelContent currentTrack={currentTrack} toggleLyrics={toggleLyrics} />;
 }
