@@ -228,6 +228,18 @@ export async function GET(req: NextRequest) {
       const fallbackTracks = Array.from(uniqueById.values()).slice(0, 15);
 
       if (fallbackTracks.length === 0) {
+        // Broad safety fallback: fetch top Hindi hits so music never stops
+        try {
+          const emergencyTracks = await searchSaavn('Top Hindi Songs', 10);
+          const validEmergency = emergencyTracks.filter(t => t && !seenIds.has(t.videoId));
+          if (validEmergency.length > 0) {
+            return NextResponse.json({
+              playlist: shuffleArray(validEmergency),
+              track: validEmergency[0],
+            });
+          }
+        } catch { /* ignore */ }
+
         return NextResponse.json({ error: 'No similar tracks found' }, { status: 404 });
       }
 

@@ -1,41 +1,50 @@
 // ============================================================
-// MoniStream — Ref-Based Current Time System
+// MoniStream — Ultra Power-Saving Current Time System
 // ============================================================
-// This decouples playback time from Zustand to avoid cascading
-// re-renders every second across all store subscribers.
-// Players write to a module-level ref (zero re-renders).
-// Components that need to display time subscribe via RAF polling.
+// Decouples playback time from Zustand to prevent re-renders.
+// Optimized for all devices (low-end mobile, laptops on battery):
 //
-// Battery optimization: The RAF loop is paused when music is
-// not playing, eliminating continuous CPU/GPU wake-ups.
+// 1. Zero polling when paused: When music is paused, RAF loop is
+//    completely stopped (no setTimeout timers waking up CPU).
+// 2. Pocket/Lockscreen Power Saving: When the screen is off or
+//    tab is in background (document.hidden), UI loops are suspended.
+//    No React state updates when nobody is looking at the screen!
+// 3. Instant sync on wakeup: When the screen turns back on,
+//    time updates immediately with zero latency.
 // ============================================================
 
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 
-// ── Module-level shared state (not React state) ──────────────
+// ── Module-level shared state (zero React overhead) ──────────
 let _currentTime = 0;
 let _isPlaying = false;
+const _playStateListeners = new Set<(playing: boolean) => void>();
 
-/** Called by players (YouTubeEmbed, NativeAudioPlayer) to update time — zero React re-renders */
+/** Called by audio players to update time without triggering React renders */
 export function setGlobalCurrentTime(t: number) {
   _currentTime = t;
 }
 
-/** Synchronous getter for imperative reads (history checks, media session, etc.) */
+/** Synchronous getter for imperative reads (history, mediaSession, etc.) */
 export function getGlobalCurrentTime(): number {
   return _currentTime;
 }
 
-/** Reset time (call on track change) */
+/** Reset time on track transition */
 export function resetGlobalCurrentTime() {
   _currentTime = 0;
 }
 
-/** Set global playing state — controls whether RAF loops run at all */
+/** Set global playing state and wake up sleeping UI listeners */
 export function setGlobalPlayingState(playing: boolean) {
   _isPlaying = playing;
+  _playStateListeners.forEach(listener => {
+    try {
+      listener(playing);
+    } catch { /* ignore */ }
+  });
 }
 
 /** Synchronous getter for playing state */
@@ -44,63 +53,108 @@ export function getGlobalPlayingState(): boolean {
 }
 
 /**
- * React hook that polls the global current time at a configurable FPS.
- * Only components that actually render time (ProgressBar, FullscreenPlayer lyrics)
- * should use this. The polling is paused when:
- * - The component is unmounted
- * - Music is not playing (_isPlaying is false)
- *
- * @param fps - How many times per second to update the React state (default: 4)
- *              4fps is plenty for a progress bar. 10fps for lyrics sync.
- * @returns The current playback time in seconds
+ * Ultra-low power hook for displaying playback progress / synced lyrics.
+ * - Suspends completely when tab/screen is hidden (saves battery in pocket)
+ * - Suspends completely when paused (no timer wakeups)
+ * - Batches UI updates according to target FPS
  */
 export function useCurrentTime(fps: number = 4): number {
-  const [time, setTime] = useState(0);
+  const [time, setTime] = useState(_currentTime);
   const rafRef = useRef<number>(0);
   const lastUpdateRef = useRef(0);
   const intervalMs = 1000 / fps;
 
   useEffect(() => {
-    let running = true;
+    let active = true;
+
+    const stopLoop = () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
+    };
+
+    const updateTimeOnce = () => {
+      const t = _currentTime;
+      setTime(prev => (Math.abs(prev - t) >= 0.08 ? t : prev));
+    };
 
     const tick = (now: number) => {
-      if (!running) return;
+      if (!active) return;
 
-      // When not playing, slow-poll at 1fps just to catch the final time value,
-      // then stop. This prevents the RAF from spinning at 60Hz while paused.
+      // If document is hidden (screen off / in pocket) or music stopped, suspend loop
+      if (typeof document !== 'undefined' && document.hidden) {
+        rafRef.current = 0;
+        return;
+      }
+
       if (!_isPlaying) {
-        // Update one last time with current value, then pause the loop
-        setTime(prev => {
-          const t = _currentTime;
-          if (Math.abs(prev - t) >= 0.1) return t;
-          return prev;
-        });
-        // Re-check every 500ms if playback resumed (cheap idle poll)
-        setTimeout(() => {
-          if (running) rafRef.current = requestAnimationFrame(tick);
-        }, 500);
+        updateTimeOnce();
+        rafRef.current = 0;
         return;
       }
 
       if (now - lastUpdateRef.current >= intervalMs) {
         lastUpdateRef.current = now;
-        const t = _currentTime;
-        // Only trigger a React re-render if the value actually changed
-        setTime(prev => {
-          const threshold = intervalMs / 1000;
-          if (Math.abs(prev - t) >= threshold) return t;
-          return prev;
-        });
+        updateTimeOnce();
       }
 
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    rafRef.current = requestAnimationFrame(tick);
+    const startLoop = () => {
+      if (!active) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (!_isPlaying) {
+        updateTimeOnce();
+        return;
+      }
+      if (!rafRef.current) {
+        lastUpdateRef.current = performance.now();
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+
+    // Listen to play/pause transitions from audio players
+    const onPlayStateChange = (playing: boolean) => {
+      if (playing) {
+        startLoop();
+      } else {
+        stopLoop();
+        updateTimeOnce();
+      }
+    };
+
+    _playStateListeners.add(onPlayStateChange);
+
+    // Listen to visibility change (screen turn on/off, tab switch)
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        // Phone screen turned off or switched away — halt RAF loop immediately
+        stopLoop();
+      } else {
+        // Screen turned back on — instant sync and resume if playing
+        updateTimeOnce();
+        if (_isPlaying) {
+          startLoop();
+        }
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
+
+    // Initial start if currently playing and visible
+    startLoop();
 
     return () => {
-      running = false;
-      cancelAnimationFrame(rafRef.current);
+      active = false;
+      stopLoop();
+      _playStateListeners.delete(onPlayStateChange);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
     };
   }, [intervalMs]);
 

@@ -1,9 +1,61 @@
+// ============================================================
+// MoniStream — JioSaavn Direct API Integration
+// ============================================================
+// Calls JioSaavn's internal API directly with CryptoJS DES-ECB
+// decryption. 100% self-contained, no external wrapper dependency.
+// ============================================================
+
+import CryptoJS from 'crypto-js';
 import { Track } from '@/types';
 import { formatDurationText } from './youtube';
 
-const SAAVN_API_BASE = 'https://saavn-api.vercel.app';
+const SAAVN_BASE = 'https://www.jiosaavn.com/api.php';
+const DES_KEY_STRING = '38346591';
 
-// Utility to decode HTML entities
+const SAAVN_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
+
+// ── Utility: Decrypt JioSaavn's encrypted media URL ─────────
+export function decryptMediaUrl(encryptedUrl: string): string {
+  if (!encryptedUrl) return '';
+  try {
+    const key = CryptoJS.enc.Utf8.parse(DES_KEY_STRING);
+    const decrypted = CryptoJS.DES.decrypt(
+      { ciphertext: CryptoJS.enc.Base64.parse(encryptedUrl.trim()) } as any,
+      key,
+      {
+        mode: CryptoJS.mode.ECB,
+        padding: CryptoJS.pad.Pkcs7,
+      }
+    );
+    const result = decrypted.toString(CryptoJS.enc.Utf8);
+    return result || '';
+  } catch (err) {
+    console.error('[JioSaavn] Decryption error:', err);
+    return '';
+  }
+}
+
+// ── Utility: Get stream URL in highest available quality ────
+function getStreamUrl(song: any): string {
+  if (song.encrypted_media_url) {
+    const decrypted = decryptMediaUrl(song.encrypted_media_url);
+    if (decrypted) {
+      // Upgrade to 320kbps if available, else 160kbps
+      if (song['320kbps'] === 'true' || song['320kbps'] === true) {
+        return decrypted.replace('_96.mp4', '_320.mp4');
+      }
+      return decrypted.replace('_96.mp4', '_160.mp4');
+    }
+  }
+  // Fallback to media preview URL (available on all JioSaavn songs)
+  return song.media_preview_url || '';
+}
+
+// ── Utility: Decode HTML entities from JioSaavn responses ───
 function decodeHTMLEntities(text: string): string {
   if (!text) return '';
   return text
@@ -11,34 +63,66 @@ function decodeHTMLEntities(text: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+    .replace(/&gt;/g, '>')
+    .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(parseInt(num, 10)));
 }
 
-function mapNewSaavnTrack(song: any): Track {
+// ── Utility: High quality album art ─────────────────────────
+function getHighQualityImage(url: string): string {
+  if (!url) return '';
+  return url.replace(/150x150|50x50/, '500x500');
+}
+
+function getDefaultImage(url: string): string {
+  if (!url) return '';
+  return url.replace(/500x500|50x50/, '150x150');
+}
+
+// ── Map JioSaavn internal song to Track ─────────────────────
+function mapSaavnSong(song: any): Track {
+  const title = decodeHTMLEntities(song.song || song.title || '');
+  const artist = decodeHTMLEntities(song.primary_artists || song.singers || song.music || 'Unknown Artist');
+  const album = decodeHTMLEntities(song.album || '');
+  const duration = parseInt(song.duration || '0', 10);
+  const image = song.image || '';
+
   return {
     videoId: `saavn_${song.id}`,
     saavnId: song.id,
     source: 'jiosaavn',
-    streamUrl: song.url || '',
-    title: decodeHTMLEntities(song.title || ''),
-    artist: decodeHTMLEntities(song.artists || 'Unknown Artist'),
-    channelId: song.album_id || 'unknown',
-    channelTitle: decodeHTMLEntities(song.album_artist || song.artists || 'Unknown Artist'),
-    albumName: decodeHTMLEntities(song.album || ''),
+    streamUrl: getStreamUrl(song),
+    title,
+    artist,
+    channelId: song.albumid || 'unknown',
+    channelTitle: artist,
+    albumName: album,
     thumbnails: {
-      default: song.image || '',
-      high: song.image || '',
+      default: getDefaultImage(image),
+      high: getHighQualityImage(image),
     },
-    duration: parseInt(song.duration || '0', 10),
-    durationText: formatDurationText(parseInt(song.duration || '0', 10)),
+    duration,
+    durationText: formatDurationText(duration),
     playCount: parseInt(song.play_count || '0', 10),
     likeCount: 0,
   };
 }
 
+// ── Search Songs ────────────────────────────────────────────
 export async function searchSaavn(query: string, limit = 20): Promise<Track[]> {
   try {
-    const res = await fetch(`${SAAVN_API_BASE}/search/${encodeURIComponent(query)}`, {
+    const params = new URLSearchParams({
+      __call: 'search.getResults',
+      _format: 'json',
+      _marker: '0',
+      cc: 'in',
+      includeMetaTags: '0',
+      p: '1',
+      q: query,
+      n: String(Math.min(limit, 30)),
+    });
+
+    const res = await fetch(`${SAAVN_BASE}?${params.toString()}`, {
+      headers: SAAVN_HEADERS,
       next: { revalidate: 3600 },
     });
 
@@ -47,29 +131,33 @@ export async function searchSaavn(query: string, limit = 20): Promise<Track[]> {
     }
 
     const json = await res.json();
-    
-    // The new API returns an array directly
-    if (!Array.isArray(json)) {
+    const results = json?.results;
+
+    if (!Array.isArray(results) || results.length === 0) {
       return [];
     }
 
-    // Limit results manually since API doesn't seem to support limit param
-    return json.slice(0, limit).map((song: any) => mapNewSaavnTrack(song));
+    return results.slice(0, limit).map(mapSaavnSong);
   } catch (error) {
-    console.error('============================');
-    console.error('Error in searchSaavn:');
-    console.error(error);
-    if (error instanceof Error && error.cause) {
-      console.error('Cause:', error.cause);
-    }
-    console.error('============================');
-    throw error; // Throw so the caller can fallback
+    console.error('[JioSaavn] Search error:', error);
+    return [];
   }
 }
 
+// ── Get Song Details by ID ──────────────────────────────────
 export async function getSaavnTrackDetails(saavnId: string): Promise<Track | null> {
   try {
-    const res = await fetch(`${SAAVN_API_BASE}/song/${saavnId}`, {
+    const cleanId = saavnId.replace(/^saavn_/, '');
+    const params = new URLSearchParams({
+      __call: 'song.getDetails',
+      _format: 'json',
+      _marker: '0',
+      cc: 'in',
+      pids: cleanId,
+    });
+
+    const res = await fetch(`${SAAVN_BASE}?${params.toString()}`, {
+      headers: SAAVN_HEADERS,
       next: { revalidate: 86400 },
     });
 
@@ -77,15 +165,18 @@ export async function getSaavnTrackDetails(saavnId: string): Promise<Track | nul
       throw new Error(`JioSaavn API error: ${res.status}`);
     }
 
-    const song = await res.json();
-    
-    if (!song || song.detail === 'Not Found' || !song.id) {
+    const json = await res.json();
+
+    // Response format: { [id]: { ...songData } }
+    const song = json[cleanId] || Object.values(json)[0];
+
+    if (!song || !song.id) {
       return null;
     }
 
-    return mapNewSaavnTrack(song);
+    return mapSaavnSong(song);
   } catch (error) {
-    console.error('Error in getSaavnTrackDetails:', error);
-    throw error;
+    console.error('[JioSaavn] Song details error:', error);
+    return null;
   }
 }

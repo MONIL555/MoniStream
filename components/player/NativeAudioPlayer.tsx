@@ -10,7 +10,9 @@ import { consumePrefetchedStreamUrl } from '@/hooks/usePrefetch';
 
 export function NativeAudioPlayer() {
   const audioRef = useRef<HTMLAudioElement>(null);
-  
+  const lastPositionUpdateRef = useRef<number>(0);
+  const historyAddedRef = useRef<boolean>(false);
+
   const {
     currentTrack,
     isPlaying,
@@ -24,12 +26,12 @@ export function NativeAudioPlayer() {
     setPlayerReady,
   } = usePlayerStore();
 
-  const { playNext, playPrevious } = useQueueStore();
+  const { playPrevious } = useQueueStore();
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
 
   const isActive = activePlayer === 'native' && currentTrack;
 
-  // 1. Fetch Stream URL if needed
+  // 1. Fetch / Resolve Stream URL
   useEffect(() => {
     if (!isActive) {
       setStreamUrl(null);
@@ -50,12 +52,10 @@ export function NativeAudioPlayer() {
 
     if (currentTrack.audioUrl) {
       let urlToPlay = currentTrack.audioUrl;
-
-      // Check if it's wrapped in our proxy
       const isProxied = urlToPlay.startsWith('/api/stream-proxy?url=');
       let rawUrl = isProxied ? decodeURIComponent(urlToPlay.replace('/api/stream-proxy?url=', '')) : urlToPlay;
 
-      // Fix old Google Drive /view URLs to direct download URLs on the fly
+      // Fix old Google Drive /view URLs to direct download URLs
       if (rawUrl.includes('drive.google.com/file/d/')) {
         const match = rawUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
         if (match && match[1]) {
@@ -63,12 +63,9 @@ export function NativeAudioPlayer() {
         }
       }
 
-      // Re-evaluate proxy requirement
       if (rawUrl.includes('drive.google.com')) {
-        // GDrive ALWAYS needs proxy due to CORP headers
         setStreamUrl(`/api/stream-proxy?url=${encodeURIComponent(rawUrl)}`);
       } else {
-        // Other sources can save bandwidth by skipping proxy
         setStreamUrl(rawUrl);
       }
       return;
@@ -78,7 +75,6 @@ export function NativeAudioPlayer() {
     const trackIdToFetch = saavnIdToUse || currentTrack.videoId;
 
     if (trackIdToFetch) {
-      // Clear the old stream URL immediately to prevent playing the old song while loading
       setStreamUrl(null);
 
       // Check prefetch cache first for instant resolution
@@ -95,12 +91,10 @@ export function NativeAudioPlayer() {
           if (data.streamUrl) {
             setStreamUrl(data.streamUrl);
           } else {
-            // Check YouTube fallback flag before falling back
             const { youtubeFallbackEnabled } = useConfigStore.getState();
             if (youtubeFallbackEnabled && !currentTrack.videoId?.startsWith('saavn_')) {
               usePlayerStore.getState().setActivePlayer('youtube');
             } else {
-              // YouTube disabled or saavn track — skip this track
               usePlayerStore.getState().advanceToNext();
             }
           }
@@ -144,11 +138,11 @@ export function NativeAudioPlayer() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // We merge these with YouTube's globally exposed functions
     const originalSeekTo = (window as any).seekTo;
     (window as any).seekTo = (seconds: number) => {
       if (usePlayerStore.getState().activePlayer === 'native' && audioRef.current) {
         audioRef.current.currentTime = seconds;
+        setGlobalCurrentTime(seconds);
       } else if (originalSeekTo) {
         originalSeekTo(seconds);
       }
@@ -156,8 +150,6 @@ export function NativeAudioPlayer() {
   }, []);
 
   // 5. Media Session (Lockscreen controls)
-  
-  // 5a. Set Metadata only when track changes
   useEffect(() => {
     if (!isActive || !currentTrack || !('mediaSession' in navigator)) return;
 
@@ -174,50 +166,44 @@ export function NativeAudioPlayer() {
     } catch { /* ignore */ }
   }, [isActive, currentTrack]);
 
-  // 5b. Update playback state only when playing state changes
   useEffect(() => {
     if (!isActive || !('mediaSession' in navigator)) return;
     navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
   }, [isActive, isPlaying]);
 
-  // 5c. Setup action handlers
   useEffect(() => {
     if (!isActive || !('mediaSession' in navigator)) return;
 
     navigator.mediaSession.setActionHandler('play', () => {
-      silentAudioRef.current?.play().catch(() => {});
-      audioRef.current?.play();
+      audioRef.current?.play().catch(() => {});
       setIsPlaying(true);
     });
 
     navigator.mediaSession.setActionHandler('pause', () => {
-      silentAudioRef.current?.pause();
       audioRef.current?.pause();
       setIsPlaying(false);
     });
 
     navigator.mediaSession.setActionHandler('previoustrack', () => {
-      silentAudioRef.current?.play().catch(() => {});
       const prev = playPrevious();
       if (prev) setCurrentTrack(prev);
     });
 
     navigator.mediaSession.setActionHandler('nexttrack', () => {
-      silentAudioRef.current?.play().catch(() => {});
       advanceToNext();
     });
-    
+
     navigator.mediaSession.setActionHandler('seekto', (details) => {
       if (audioRef.current && details.seekTime !== undefined) {
         audioRef.current.currentTime = details.seekTime;
+        setGlobalCurrentTime(details.seekTime);
       }
     });
   }, [isActive, playPrevious, advanceToNext, setCurrentTrack, setIsPlaying]);
 
-  const historyAddedRef = useRef(false);
-
   useEffect(() => {
     historyAddedRef.current = false;
+    lastPositionUpdateRef.current = 0;
   }, [currentTrack?.videoId]);
 
   const handleTimeUpdate = () => {
@@ -226,14 +212,19 @@ export function NativeAudioPlayer() {
       const duration = audioRef.current.duration;
       setGlobalCurrentTime(t);
 
-      if ('mediaSession' in navigator && isFinite(duration) && duration > 0) {
-        try {
-          navigator.mediaSession.setPositionState({
-            duration: duration,
-            playbackRate: audioRef.current.playbackRate || 1,
-            position: t
-          });
-        } catch (e) { /* ignore */ }
+      // Throttle MediaSession positionState updates to once per 1.5 seconds to minimize OS IPC overhead
+      const now = Date.now();
+      if (now - lastPositionUpdateRef.current >= 1500) {
+        lastPositionUpdateRef.current = now;
+        if ('mediaSession' in navigator && isFinite(duration) && duration > 0) {
+          try {
+            navigator.mediaSession.setPositionState({
+              duration,
+              playbackRate: audioRef.current.playbackRate || 1,
+              position: t,
+            });
+          } catch { /* ignore */ }
+        }
       }
 
       if (t >= 30 && !historyAddedRef.current && currentTrack) {
@@ -248,7 +239,7 @@ export function NativeAudioPlayer() {
       setDuration(audioRef.current.duration);
       setPlayerReady(true);
       if (isPlaying) {
-         audioRef.current.play().catch(() => {});
+        audioRef.current.play().catch(() => {});
       }
     }
   };
@@ -260,13 +251,12 @@ export function NativeAudioPlayer() {
   };
 
   const handleError = (e: any) => {
-    if (!streamUrl) return; // Ignore errors caused by clearing the src during track transitions
-    
+    if (!streamUrl) return;
+
     if (isActive) {
       console.error('Native Audio Player Error:', e?.nativeEvent);
       const { youtubeFallbackEnabled } = useConfigStore.getState();
-      
-      // Only fallback if YouTube is enabled AND it's a valid YouTube video ID (not a JioSaavn track)
+
       if (youtubeFallbackEnabled && !currentTrack?.videoId?.startsWith('saavn_')) {
         console.error('Falling back to YouTube Embed...');
         useHistoryStore.getState().removeFromHistory(currentTrack!.videoId);
@@ -277,39 +267,19 @@ export function NativeAudioPlayer() {
     }
   };
 
-  const silentAudioRef = useRef<HTMLAudioElement>(null);
-
-  // Keep silent audio in sync with play state to hold the lockscreen session
-  useEffect(() => {
-    if (isPlaying && isActive) {
-      silentAudioRef.current?.play().catch(() => {});
-    } else {
-      silentAudioRef.current?.pause();
-    }
-  }, [isPlaying, isActive]);
-
   if (!isActive) return null;
 
   return (
-    <>
-      <audio
-        ref={silentAudioRef}
-        src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA="
-        loop
-        playsInline
-        preload="auto"
-        className="hidden"
-      />
-      <audio
-        ref={audioRef}
-        src={streamUrl || undefined}
-        preload="auto"
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleLoadedMetadata}
-        onEnded={handleEnded}
-        onError={handleError}
-        className="hidden"
-      />
-    </>
+    <audio
+      ref={audioRef}
+      src={streamUrl || undefined}
+      preload="auto"
+      playsInline
+      onTimeUpdate={handleTimeUpdate}
+      onLoadedMetadata={handleLoadedMetadata}
+      onEnded={handleEnded}
+      onError={handleError}
+      className="hidden"
+    />
   );
 }

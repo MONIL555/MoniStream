@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { TrackCover } from '@/components/ui/track-cover';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
@@ -120,6 +120,8 @@ export function HomeDashboard() {
       cachedAt: new Date().toISOString(),
       saavnId: track.saavnId,
       source: track.source,
+      streamUrl: track.streamUrl,
+      audioUrl: track.audioUrl,
     };
     loadSingle(trackData);
     setCurrentTrack(trackData);
@@ -157,15 +159,17 @@ export function HomeDashboard() {
   );
 
   const trendingTracks = Array.isArray(trendingData) ? trendingData : trendingData?.items || [];
-  const validTrendingTracks = Array.from(new Map(
-    trendingTracks
-      .filter((i: any) => i.track || i.videoId || i.id)
-      .map((i: any) => i.track || i)
-      .map((track: any) => {
-        const baseTitle = (track.title || '').split('(')[0].split('-')[0].trim().toLowerCase();
-        return [baseTitle, track];
-      })
-  ).values());
+  const validTrendingTracks = useMemo(() => {
+    return Array.from(new Map(
+      trendingTracks
+        .filter((i: any) => i.track || i.videoId || i.id)
+        .map((i: any) => i.track || i)
+        .map((track: any) => {
+          const baseTitle = (track.title || '').split('(')[0].split('-')[0].trim().toLowerCase();
+          return [baseTitle, track];
+        })
+    ).values());
+  }, [trendingTracks]);
 
   return (
     <div className="flex flex-col gap-8 pb-12 animate-fade-in">

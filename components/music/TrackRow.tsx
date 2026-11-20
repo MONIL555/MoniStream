@@ -31,6 +31,9 @@ export const TrackRow = memo(function TrackRow({ track, index, showCover = true,
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const swipeStartXRef = useRef<number>(0);
+  const currentSwipeXRef = useRef<number>(0);
+  const swipeElRef = useRef<HTMLDivElement | null>(null);
   
   const currentTrack = usePlayerStore(s => s.currentTrack);
   const isPlaying = usePlayerStore(s => s.isPlaying);
@@ -179,48 +182,52 @@ export const TrackRow = memo(function TrackRow({ track, index, showCover = true,
         </div>
       )}
 
-      {/* Lightweight native touch swipe — replaces Framer Motion drag for performance */}
+      {/* Lightweight native touch swipe — leak-free React event handlers */}
       <div 
-        ref={(el) => {
-          if (!el || isPendingAdmin) return;
-          let startX = 0;
-          let currentX = 0;
-          let swiping = false;
-          
-          const onTouchStart = (e: TouchEvent) => {
-            startX = e.touches[0].clientX;
-            currentX = 0;
-            swiping = true;
-            el.style.transition = 'none';
-          };
-          const onTouchMove = (e: TouchEvent) => {
-            if (!swiping) return;
-            currentX = Math.max(0, e.touches[0].clientX - startX);
-            el.style.transform = `translateX(${Math.min(currentX, 100)}px)`;
-            if (currentX > 10) setIsDragging(true);
-          };
-          const onTouchEnd = () => {
-            if (!swiping) return;
-            swiping = false;
-            el.style.transition = 'transform 0.2s ease-out';
-            el.style.transform = 'translateX(0px)';
-            if (currentX > 80) {
-              const trackData = {
-                videoId: track.videoId, title, artist,
-                channelId: track.channelId || '',
-                thumbnails: { default: thumbnail },
-                duration: track.duration || 0, durationText,
-                tags: [], playCount: 0, likeCount: 0, cachedAt: new Date().toISOString()
-              };
-              addToQueue(trackData);
-              toast.success('Added to queue');
-            }
-            setTimeout(() => setIsDragging(false), 100);
-          };
-          
-          el.addEventListener('touchstart', onTouchStart, { passive: true });
-          el.addEventListener('touchmove', onTouchMove, { passive: true });
-          el.addEventListener('touchend', onTouchEnd, { passive: true });
+        ref={swipeElRef}
+        onTouchStart={(e) => {
+          if (isPendingAdmin) return;
+          swipeStartXRef.current = e.touches[0].clientX;
+          currentSwipeXRef.current = 0;
+          if (swipeElRef.current) {
+            swipeElRef.current.style.transition = 'none';
+          }
+        }}
+        onTouchMove={(e) => {
+          if (isPendingAdmin || !swipeStartXRef.current) return;
+          const diff = Math.max(0, e.touches[0].clientX - swipeStartXRef.current);
+          currentSwipeXRef.current = diff;
+          if (swipeElRef.current) {
+            swipeElRef.current.style.transform = `translateX(${Math.min(diff, 100)}px)`;
+          }
+          if (diff > 10) setIsDragging(true);
+        }}
+        onTouchEnd={() => {
+          if (isPendingAdmin) return;
+          const moved = currentSwipeXRef.current;
+          swipeStartXRef.current = 0;
+          currentSwipeXRef.current = 0;
+          if (swipeElRef.current) {
+            swipeElRef.current.style.transition = 'transform 0.2s ease-out';
+            swipeElRef.current.style.transform = 'translateX(0px)';
+          }
+          if (moved > 80) {
+            const trackData = {
+              videoId: track.videoId,
+              saavnId: track.saavnId,
+              source: track.source,
+              streamUrl: track.streamUrl,
+              audioUrl: track.audioUrl,
+              title, artist,
+              channelId: track.channelId || '',
+              thumbnails: { default: thumbnail },
+              duration: track.duration || 0, durationText,
+              tags: [], playCount: 0, likeCount: 0, cachedAt: new Date().toISOString()
+            };
+            addToQueue(trackData);
+            toast.success('Added to queue');
+          }
+          setTimeout(() => setIsDragging(false), 100);
         }}
         className={cn(
           "relative bg-background group flex items-center gap-2 md:gap-3 px-2 md:px-3 py-1.5 md:py-2 rounded-xl transition-colors duration-200",

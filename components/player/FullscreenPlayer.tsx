@@ -237,9 +237,9 @@ export function FullscreenPlayer() {
             backgroundImage: thumbnail ? `url(${thumbnail})` : 'none',
             backgroundSize: 'cover',
             backgroundPosition: 'center',
-            filter: 'blur(60px)',
-            transform: 'scale(1.1)',
-            contain: 'layout style paint',
+            filter: 'blur(28px)',
+            transform: 'scale(1.05)',
+            contain: 'strict',
           }}
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/80 pointer-events-none" />
